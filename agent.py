@@ -245,7 +245,7 @@ def agent_main(args):
 
     write_model_file(code_text, output_path=args.output)
 
-    print("Done. You can run the generated model with: python model.py --train <train> --val <val> --test <test>")
+    print("Done. You can run the generated model with: python model.py --train <train> --val <val>")
 
 
 if __name__ == "__main__":
