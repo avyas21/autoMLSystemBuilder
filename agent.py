@@ -1,8 +1,4 @@
 import os
-
-os.environ["OPENAI_API_KEY"] = "<REDACTED>"
-
-import os
 import argparse
 import json
 from pathlib import Path
@@ -11,10 +7,13 @@ import openai
 from PIL import Image
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
-from typing import Optional, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ---------- Configuration ----------
-OPENAI_MODEL = "gpt-4o"  # replace with desired chat model available to you
+OPENAI_MODEL = "gpt-4o-mini"  # Using mini model for faster/cheaper testing
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
@@ -114,43 +113,140 @@ def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
 # ---------- LLM prompt builder ----------
 def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions: Optional[str] = None) -> str:
     """
-    Build a clear prompt for ChatGPT to generate a ready-to-run model.py file.
-    The assistant should return only valid Python code in the final message.
+    Build a clear prompt for ChatGPT to generate model.py and requirements.txt.
+    The assistant should return structured output with both files.
     """
     lines = []
-    lines.append("You are to generate a single Python file named `model.py` that includes:")
+    lines.append("You are to generate TWO files:")
+    lines.append("")
+    lines.append("1. `model.py` - A Python file that includes:")
     lines.append("- A PyTorch model class (nn.Module) appropriate for the dataset.")
-    lines.append("- A `train()` function that trains the model, with configurable hyperparameters.")
+    lines.append("- A `train()` function that trains the model for multiple epochs.")
     lines.append("- A `validate()` function that evaluates the model on a validation dataset and reports metrics.")
-    lines.append("- An `if __name__ == '__main__'` block that demonstrates how to use the train/validate functions with argparse.")
+    lines.append("- An `if __name__ == '__main__'` block with argparse CLI.")
     lines.append("")
-    lines.append("Important constraints:")
-    lines.append("- The output MUST be valid, runnable Python. Do not include text explanations, only the file contents.")
-    lines.append("- Use standard libraries and PyTorch. Keep external dependency usage minimal.")
-    lines.append("- Save the trained model to `best_model.pth` when validation metric improves.")
-    lines.append("- Include comments/docstrings for clarity but avoid long prose.")
+    lines.append("CRITICAL REQUIREMENTS:")
     lines.append("")
-    lines.append("Dataset facts (infer from the provided paths):")
+    lines.append("1. ARGPARSE INTERFACE - Use these EXACT argument names:")
+    lines.append("   --train (path to training data)")
+    lines.append("   --val (path to validation data)")
+    lines.append("   --epochs (number of epochs, default=10)")
+    lines.append("   --batch-size (batch size, default=64)")
+    lines.append("   --lr (learning rate, default=0.001)")
+    lines.append("")
+    lines.append("2. DEVICE HANDLING - MUST support both CPU and GPU:")
+    lines.append("   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
+    lines.append("   Move model and data to device in train/validate functions")
+    lines.append("")
+    lines.append("3. TRAINING LOOP - Proper structure:")
+    lines.append("   - Train function should accept epochs parameter and run full training loop")
+    lines.append("   - Print average loss per epoch (not just last batch)")
+    lines.append("   - In main: call train() ONCE with all epochs, not in a loop")
+    lines.append("")
+    lines.append("4. LOGGING - Print after each epoch:")
+    lines.append("   Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%")
+    lines.append("")
+    lines.append("5. CHECKPOINTING - Save model when validation metric improves:")
+    lines.append("   torch.save(model.state_dict(), 'best_model.pth')")
+    lines.append("   Print message when saving: 'Saved best model (Val Acc: XX.XX%)'")
+    lines.append("")
+    lines.append("6. CODE QUALITY:")
+    lines.append("   - Use proper variable names")
+    lines.append("   - Add docstrings to functions")
+    lines.append("   - Handle edge cases (empty datasets, etc.)")
+    lines.append("")
+    lines.append("7. DEPENDENCIES - ONLY use these libraries (DO NOT import anything else):")
+    lines.append("   - torch (and torch.nn, torch.optim, torch.utils.data)")
+    lines.append("   - pandas (for CSV reading)")
+    lines.append("   - numpy (if needed for array operations)")
+    lines.append("   DO NOT import: sklearn, scipy, torchvision (unless image_folder), matplotlib, seaborn")
+    lines.append("")
+    lines.append("Dataset facts:")
     lines.append(json.dumps(facts, indent=2))
     lines.append("")
     if facts.get("split_type") == "image_folder":
-        lines.append("Use a simple torchvision-based Dataset + transforms. Use CrossEntropyLoss for classification.")
-        lines.append("Set input channels = {channels}, example size = {example_size}, num_classes = {num_classes}.".format(**facts))
+        lines.append("DATASET TYPE: Image Folder")
+        lines.append("- Use torchvision.datasets.ImageFolder or custom Dataset")
+        lines.append("- Apply transforms: ToTensor(), Normalize()")
+        lines.append("- Input: channels={channels}, size={example_size}, classes={num_classes}".format(**facts))
+        lines.append("- Use CrossEntropyLoss for classification")
+        lines.append("- Architecture: Use a simple CNN (Conv2d -> Pool -> FC layers)")
     elif facts.get("split_type") == "csv":
-        lines.append("Assume tabular data in CSV. Provide a simple PyTorch Dataset that reads CSV with pandas and returns (features_tensor, target_tensor).")
+        lines.append("DATASET TYPE: CSV Tabular Data")
+        lines.append("- Create custom Dataset class that reads CSV with pandas")
+        lines.append("- Normalize features: divide by 255.0 if pixel data, otherwise use standard scaling")
+        lines.append("- Architecture: Use MLP (Linear -> ReLU -> Linear layers)")
         if facts.get("task") == "classification":
-            lines.append("Treat as classification with n_classes = {}.".format(facts.get("n_classes", "unknown")))
+            lines.append("- Task: Classification with {} classes".format(facts.get("n_classes", "unknown")))
+            lines.append("- Loss: CrossEntropyLoss")
+            lines.append("- Metrics: Accuracy")
         else:
-            lines.append("Treat as regression.")
+            lines.append("- Task: Regression")
+            lines.append("- Loss: MSELoss")
+            lines.append("- Metrics: RMSE or MAE")
     else:
-        lines.append("Dataset type unknown; produce a flexible template that the user can adapt: simple MLP for tabular and a small CNN for images with clear TODOs.")
-    if additional_instructions:
-        lines.append("")
-        lines.append("Additional instructions:")
-        lines.append(additional_instructions)
-    # final directive
+        lines.append("Dataset type unknown; create flexible MLP template with TODOs")
+
     lines.append("")
-    lines.append("Return only the contents of the file `model.py` — do not include any markdown, file markers, or explanation.")
+    lines.append("EXAMPLE STRUCTURE (follow this pattern):")
+    lines.append("```")
+    lines.append("import argparse")
+    lines.append("import torch")
+    lines.append("import torch.nn as nn")
+    lines.append("# ... other imports")
+    lines.append("")
+    lines.append("class MyDataset(Dataset):")
+    lines.append("    # Dataset implementation")
+    lines.append("")
+    lines.append("class MyModel(nn.Module):")
+    lines.append("    # Model architecture")
+    lines.append("")
+    lines.append("def train(model, train_loader, criterion, optimizer, device, epochs):")
+    lines.append("    model.train()")
+    lines.append("    for epoch in range(epochs):")
+    lines.append("        total_loss = 0")
+    lines.append("        for data, target in train_loader:")
+    lines.append("            data, target = data.to(device), target.to(device)")
+    lines.append("            # ... training step")
+    lines.append("        avg_loss = total_loss / len(train_loader)")
+    lines.append("        # ... print and return metrics")
+    lines.append("")
+    lines.append("def validate(model, val_loader, criterion, device):")
+    lines.append("    model.eval()")
+    lines.append("    # ... validation logic with data.to(device)")
+    lines.append("")
+    lines.append("if __name__ == '__main__':")
+    lines.append("    parser = argparse.ArgumentParser()")
+    lines.append("    parser.add_argument('--train', required=True)")
+    lines.append("    parser.add_argument('--val', required=True)")
+    lines.append("    parser.add_argument('--epochs', type=int, default=10)")
+    lines.append("    # ... other args")
+    lines.append("    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
+    lines.append("    # ... setup and training")
+    lines.append("```")
+    lines.append("")
+
+    if additional_instructions:
+        lines.append("ADDITIONAL INSTRUCTIONS:")
+        lines.append(additional_instructions)
+        lines.append("")
+
+    lines.append("")
+    lines.append("2. `requirements.txt` - List all pip packages needed (one per line)")
+    lines.append("   Include version constraints if important (e.g., torch>=2.0.0)")
+    lines.append("   Common packages: torch, pandas, numpy, scikit-learn, pillow")
+    lines.append("")
+    lines.append("OUTPUT FORMAT - Use this EXACT structure:")
+    lines.append("=== requirements.txt ===")
+    lines.append("package1")
+    lines.append("package2>=version")
+    lines.append("package3")
+    lines.append("")
+    lines.append("=== model.py ===")
+    lines.append("import package1")
+    lines.append("# ... rest of Python code")
+    lines.append("")
+    lines.append("IMPORTANT: Use the === markers exactly as shown. No markdown blocks (```), no extra explanations.")
     return "\n".join(lines)
 
 def build_langgraph_pipeline(prompt: str) -> Optional[str]:
@@ -213,6 +309,49 @@ def build_langgraph_pipeline(prompt: str) -> Optional[str]:
 
 
 # ---------- Main agent logic ----------
+def parse_dual_output(llm_output: str) -> Dict[str, str]:
+    """
+    Parse LLM output into requirements.txt and model.py.
+    Expected format:
+    === requirements.txt ===
+    package1
+    package2
+
+    === model.py ===
+    python code here
+    """
+    files = {}
+
+    # Look for === markers
+    if "=== requirements.txt ===" in llm_output and "=== model.py ===" in llm_output:
+        parts = llm_output.split("=== requirements.txt ===")
+        if len(parts) >= 2:
+            rest = parts[1]
+            req_and_model = rest.split("=== model.py ===")
+            if len(req_and_model) >= 2:
+                files["requirements.txt"] = req_and_model[0].strip()
+                files["model.py"] = req_and_model[1].strip()
+                return files
+
+    # Fallback: if no markers found, treat entire output as model.py
+    print("Warning: Could not find === markers, treating entire output as model.py")
+    files["model.py"] = llm_output.strip()
+    files["requirements.txt"] = "torch\npandas\nnumpy"  # default dependencies
+
+    return files
+
+
+def write_files(files: Dict[str, str]) -> None:
+    """Write multiple files from dict."""
+    for filename, content in files.items():
+        # Clean up any remaining code block markers
+        content = content.replace("```python", "").replace("```", "").strip()
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"✓ Wrote {filename}")
+
+
 def write_model_file(contents: str, output_path: str = "model.py") -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(contents)
@@ -223,29 +362,24 @@ def agent_main(args):
     facts = inspect_dataset(args.train, args.val)
     prompt = build_model_generation_prompt(facts, additional_instructions=args.instructions)
 
-    code_text = None
+    print("Calling LLM to generate code and dependencies...")
+    llm_output = build_langgraph_pipeline(prompt)
 
-    code_text = build_langgraph_pipeline(prompt)
-    if code_text:
-        print("Obtained code from LangGraph pipeline.")
-    else:
-        print("OpenAI call has failed")
+    if not llm_output:
+        print("✗ OpenAI call failed")
+        return
 
-    if code_text.strip().startswith("```"):
-        # remove common triple-backtick fences
-        # find the first line with ``` and remove surrounding fences
-        first = code_text.find("```")
-        # remove leading fence
-        code_body = code_text.split("```", 2)
-        if len(code_body) >= 3:
-            code_text = code_body[2]
-        else:
-            # fallback: remove first fence only
-            code_text = code_text.replace("```python", "").replace("```", "")
+    print("✓ Obtained response from LangGraph pipeline")
 
-    write_model_file(code_text, output_path=args.output)
+    # Parse output into separate files
+    files = parse_dual_output(llm_output)
 
-    print("Done. You can run the generated model with: python model.py --train <train> --val <val>")
+    # Write both files
+    write_files(files)
+
+    print("\nDone! Next steps:")
+    print("  1. Install dependencies: pip install -r requirements.txt")
+    print("  2. Run model: python model.py --train <train> --val <val>")
 
 
 if __name__ == "__main__":
