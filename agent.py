@@ -8,6 +8,9 @@ from PIL import Image
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
+from typing import Optional, Dict, Any
+import subprocess
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -249,6 +252,79 @@ def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions
     lines.append("IMPORTANT: Use the === markers exactly as shown. No markdown blocks (```), no extra explanations.")
     return "\n".join(lines)
 
+def run_model(train_path, val_path):
+    cmd = ["python", "model.py", "--train", train_path, "--val", val_path]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.stdout, result.stderr
+
+def extract_metrics(output_text: str) -> Dict[str, Optional[float]]:
+    """
+    Extract best (lowest) validation loss and best (highest) validation accuracy
+    from model training logs. Matches both 'Validation Loss' and 'Val Loss' formats.
+
+    Example matches:
+        "Val Loss: 0.1234, Val Accuracy: 95.23%"
+        "Validation Loss: 0.341, Validation Accuracy: 92.1%"
+    """
+    # Find all loss values (support both "Val" and "Validation")
+    loss_matches = re.findall(r"(?:Val(?:idation)?\s*Loss)[:\s]+([0-9.]+)", output_text, re.IGNORECASE)
+
+    # Find all accuracy values (support both "Val" and "Validation Accuracy")
+    acc_matches = re.findall(r"(?:Val(?:idation)?\s*Acc(?:uracy)?)[:\s]+([0-9.]+)", output_text, re.IGNORECASE)
+
+    # Convert to floats safely
+    losses = [float(x) for x in loss_matches if re.match(r"^\d+(\.\d+)?$", x)]
+    accs = [float(x) for x in acc_matches if re.match(r"^\d+(\.\d+)?$", x)]
+
+    # Return best observed metrics
+    metrics = {
+        "val_loss": min(losses) if losses else None,
+        "val_acc": max(accs) if accs else None,
+    }
+
+    return metrics
+
+
+def build_refinement_prompt(prev_code: str, train_output: str, metrics: Dict[str, float]) -> str:
+    """
+    Build an instruction prompt for the LLM to improve the model based on
+    full training/validation logs and extracted metrics.
+    """
+    val_loss = metrics.get("val_loss", "unknown")
+    val_acc = metrics.get("val_acc", "unknown")
+
+    prompt = f"""
+        You are an AI code assistant refining a PyTorch training script.
+
+        Below is the **full training log** from running the current model. 
+        Use it to analyze learning progress and improve model design and training strategy.
+
+        Training Output:
+        ----------------
+        {train_output.strip()}
+        ----------------
+
+        Summary of last metrics:
+        - Validation Loss: {val_loss}
+        - Validation Accuracy: {val_acc}
+
+        Your task:
+        - Modify the code to improve model performance.
+        - You may change:
+        - Model architecture (depth, layers, dropout, normalization, etc.)
+        - Learning rate, optimizer, batch size, or scheduler
+        - Data augmentations or regularization
+        - Keep the same CLI interface (arguments: --train, --val)
+        - The output must remain a **runnable single-file Python script**.
+        - Output *only* the Python code for model.py — no explanations or markdown.
+
+        Previous model.py:
+
+        {prev_code.strip()}
+
+        """
+    return prompt.strip()
+
 def build_langgraph_pipeline(prompt: str) -> Optional[str]:
     """
     Build and run a LangGraph pipeline using StateGraph and ChatOpenAI node.
@@ -362,31 +438,63 @@ def agent_main(args):
     facts = inspect_dataset(args.train, args.val)
     prompt = build_model_generation_prompt(facts, additional_instructions=args.instructions)
 
-    print("Calling LLM to generate code and dependencies...")
+    # First model generation
+    print("Calling LLM to generate initial code and dependencies...")
     llm_output = build_langgraph_pipeline(prompt)
-
     if not llm_output:
-        print("✗ OpenAI call failed")
+        print("✗ Initial model generation failed.")
         return
 
-    print("✓ Obtained response from LangGraph pipeline")
-
-    # Parse output into separate files
+    print("✓ Obtained initial model from LangGraph pipeline.")
     files = parse_dual_output(llm_output)
-
-    # Write both files
     write_files(files)
 
-    print("\nDone! Next steps:")
-    print("  1. Install dependencies: pip install -r requirements.txt")
-    print("  2. Run model: python model.py --train <train> --val <val>")
+    # Start refinement loop
+    best_code = files["model.py"]
+    best_loss = float("inf")
 
+    for i in range(args.iterations):
+        print(f"\n=== Iteration {i + 1}/{args.iterations} ===")
 
+        # Write and run model
+        write_model_file(best_code, args.output)
+        stdout, stderr = run_model(args.train, args.val)
+
+        if stderr.strip():
+            print("⚠️ Model training produced errors:\n", stderr)
+
+        print("Model output:\n", stdout)
+        metrics = extract_metrics(stdout)
+        print("Extracted metrics:", metrics)
+
+        # Track best model by lowest val_loss
+        if metrics.get("val_loss") is not None and metrics["val_loss"] < best_loss:
+            best_loss = metrics["val_loss"]
+            best_code = open(args.output).read()
+            print(f"✅ New best model found (Val Loss: {best_loss:.4f})")
+
+        # Build refinement prompt using full logs + metrics
+        refine_prompt = build_refinement_prompt(best_code, stdout, metrics)
+        refined_code = build_langgraph_pipeline(refine_prompt)
+
+        if refined_code:
+            best_code = refined_code
+            print("Refinement iteration complete — model updated.")
+        else:
+            print("No refinement returned; stopping.")
+            break
+
+    # Write best final version
+    write_model_file(best_code, "best_model.py")
+    print(f"\nBest model saved as best_model.py with val_loss={best_loss}")
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", required=True, help="Path to training split (dir or csv)")
     parser.add_argument("--val", required=True, help="Path to validation split (dir or csv)")
     parser.add_argument("--output", default="model.py", help="Output file for the generated model code")
     parser.add_argument("--instructions", default="", help="Extra instructions to include in prompt")
+    parser.add_argument("--iterations", type=int, default=3, help="Number of model refinement iterations")
+
     args = parser.parse_args()
     agent_main(args)
