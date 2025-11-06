@@ -1,0 +1,36 @@
+{
+  "functional_tests": {
+    "syntax_valid": true,
+    "imports_valid": true,
+    "components": {
+      "model_class": true,
+      "train_function": true,
+      "validate_function": true,
+      "main_block": true,
+      "argparse": true
+    },
+    "code_runs": true,
+    "cli_works": true
+  },
+  "performance_tests": {
+    "training": {
+      "completed": true,
+      "training_time": 157.4279806613922,
+      "final_output": "Epoch 1/2: Train Loss: 1.8865, Train Acc: 31.34%\nEpoch 2/2: Train Loss: 1.7011, Train Acc: 38.91%\nValidation Loss: 1.6283, Validation Acc: 42.24%\nSaved best model (Val Acc: 42.24%)\nEpoch 1/2: Train Loss: 1.6258, Train Acc: 41.97%\nEpoch 2/2: Train Loss: 1.5750, Train Acc: 43.82%\nValidation Loss: 1.5539, Validation Acc: 44.86%\nSaved best model (Val Acc: 44.86%)\n",
+      "error": null
+    },
+    "checkpoint": {
+      "checkpoint_exists": true,
+      "checkpoint_loadable": true,
+      "checkpoint_size": 1611622
+    }
+  },
+  "overall_status": "PASS",
+  "timestamp": "2025-11-02 11:57:22",
+  "dependency_install": {
+    "requirements_exists": true,
+    "install_success": true,
+    "install_output": "Requirement already satisfied: torch>=2.0.0 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from -r requirements.txt (line 1)) (2.2.2)\nRequirement already satisfied: pandas in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from -r requirements.txt (line 2)) (2.2.3)\nRequirement already satisfied: numpy in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from -r requirements.txt (line 3)) (1.26.4)\nRequirement already satisfied: filelock in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from torch>=2.0.0->-r requirements.txt (line 1)) (3.13.4)\nRequirement already satisfied: typing-extensions>=4.8.0 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from torch>=2.0.0->-r requirements.txt (line 1)) (4.13.2)\nRequirement already satisfied: sympy in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from torch>=2.0.0->-r requirements.txt (line 1)) (1.13.3)\nRequirement already satisfied: networkx in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from torch>=2.0.0->-r requirements.txt (line 1)) (3.4.2)\nRequirement already satisfied: jinja2 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from torch>=2.0.0->-r requirements.txt (line 1)) (3.1.6)\nRequirement already satisfied: fsspec in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from torch>=2.0.0->-r requirements.txt (line 1)) (2025.3.0)\nRequirement already satisfied: python-dateutil>=2.8.2 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from pandas->-r requirements.txt (line 2)) (2.9.0.post0)\nRequirement already satisfied: pytz>=2020.1 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from pandas->-r requirements.txt (line 2)) (2025.2)\nRequirement already satisfied: tzdata>=2022.7 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from pandas->-r requirements.txt (line 2)) (2025.2)\nRequirement already satisfied: six>=1.5 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from python-dateutil>=2.8.2->pandas->-r requirements.txt (line 2)) (1.17.0)\nRequirement already satisfied: MarkupSafe>=2.0 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from jinja2->torch>=2.0.0->-r requirements.txt (line 1)) (3.0.2)\nRequirement already satisfied: mpmath<1.4,>=1.1.0 in /Users/cuiyuanxiuchen/.pyenv/versions/3.11.2/lib/python3.11/site-packages (from sympy->torch>=2.0.0->-r requirements.txt (line 1)) (1.3.0)\n",
+    "error": null
+  }
+}

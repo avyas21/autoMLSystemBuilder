@@ -5,11 +5,28 @@ An AI-powered agent that automatically generates PyTorch training code for machi
 ## Overview
 
 This system uses LLMs (via LangGraph + OpenAI) to:
-1. Inspect datasets and infer properties
-2. Generate complete PyTorch training code (`model.py`)
-3. Generate dependency specifications (`requirements.txt`)
-4. Automatically install dependencies
-5. Evaluate code quality and performance
+1. **Search for datasets online** based on natural language prompts (NEW!)
+2. **Download and convert datasets** from Kaggle and HuggingFace (NEW!)
+3. Inspect datasets and infer properties
+4. Generate complete PyTorch training code (`model.py`)
+5. Generate dependency specifications (`requirements.txt`)
+6. Automatically install dependencies
+7. Evaluate code quality and performance
+
+## ✨ NEW: Search and Build Pipeline
+
+You can now go from a natural language prompt to a trained model with a single command!
+
+```bash
+python search_and_build.py --prompt "I want to create an image classifier for dogs and cats" --train-model
+```
+
+This will:
+1. Parse your prompt using LLM
+2. Search Kaggle and HuggingFace for relevant datasets
+3. Download and convert the best matching dataset
+4. Generate PyTorch training code
+5. Train the model automatically
 
 ## Project Structure
 
@@ -17,6 +34,9 @@ This system uses LLMs (via LangGraph + OpenAI) to:
 autoMLSystemBuilder/
 ├── agent.py                    # Core agent (generates ML code)
 ├── evaluate_agent.py           # Evaluation harness
+├── search_and_build.py         # NEW: End-to-end pipeline
+├── dataset_search.py           # NEW: Dataset search module
+├── dataset_converter.py        # NEW: Dataset download & conversion
 ├── datasets/                   # Training datasets (gitignored)
 │   ├── mnist_train.csv
 │   ├── mnist_test.csv
@@ -24,11 +44,13 @@ autoMLSystemBuilder/
 │   └── fashion_mnist_test.csv
 ├── utils/                      # Utility scripts
 │   ├── download_fashion_mnist.py
+│   ├── download_cifar10.py
 │   └── compare_results.py
 ├── examples/                   # Example evaluation results
 │   └── evaluation_results/
 │       ├── mnist.json
-│       └── fashion_mnist.json
+│       ├── fashion_mnist.json
+│       └── cifar10.json
 └── generated/                  # Generated code (gitignored)
     ├── model.py
     ├── requirements.txt
@@ -39,19 +61,41 @@ autoMLSystemBuilder/
 
 1. **Install dependencies:**
    ```bash
-   pip install openai langgraph langchain-openai python-dotenv pandas pillow torch
+   pip install -r requirements.txt
    ```
 
-2. **Configure OpenAI API key:**
+2. **Configure API keys:**
+
+   **OpenAI (Required):**
    ```bash
    # Create .env file
    echo "OPENAI_API_KEY=your-key-here" > .env
    ```
 
-3. **Download datasets:**
+   **Kaggle (Optional - for dataset search):**
+   ```bash
+   # Download API credentials from https://www.kaggle.com/account
+   # Place kaggle.json in ~/.kaggle/
+   mkdir -p ~/.kaggle
+   cp kaggle.json ~/.kaggle/
+   chmod 600 ~/.kaggle/kaggle.json
+   ```
+
+   **HuggingFace (Optional - for dataset search):**
+   ```bash
+   # Login to HuggingFace
+   huggingface-cli login
+   # Or set token in environment
+   echo "HUGGINGFACE_TOKEN=your-token-here" >> .env
+   ```
+
+3. **Optional: Download example datasets manually:**
    ```bash
    # Fashion-MNIST
    python utils/download_fashion_mnist.py
+
+   # CIFAR-10
+   python utils/download_cifar10.py
 
    # MNIST (via git-lfs)
    git lfs pull
@@ -59,9 +103,32 @@ autoMLSystemBuilder/
 
 ## Usage
 
-### Quick Start
+### 🚀 Quick Start: Natural Language to Model
 
-Generate and evaluate code on MNIST:
+The easiest way to build a model is with a natural language prompt:
+
+```bash
+# Search, download, and generate code
+python search_and_build.py --prompt "I want to create an image classifier for dogs and cats"
+
+# Full pipeline with automatic training
+python search_and_build.py \
+  --prompt "Build a model to classify handwritten digits" \
+  --train-model \
+  --epochs 10
+
+# Select a specific dataset from search results
+python search_and_build.py \
+  --prompt "Image classification for flowers" \
+  --select-dataset 2 \
+  --train-model
+```
+
+### 📦 Traditional Workflow (with existing datasets)
+
+If you already have datasets in CSV format:
+
+**Generate and evaluate code:**
 ```bash
 python evaluate_agent.py \
   --train datasets/mnist_train.csv \
@@ -70,7 +137,7 @@ python evaluate_agent.py \
   --output results.json
 ```
 
-### Step-by-Step
+**Step-by-step:**
 
 1. **Generate code only:**
    ```bash
@@ -92,6 +159,21 @@ python evaluate_agent.py \
    ```bash
    python utils/compare_results.py
    ```
+
+### 🔍 Dataset Search Only
+
+You can also use the search functionality independently:
+
+```bash
+# Search for datasets
+python dataset_search.py --prompt "dog cat classification" --max-results 10
+
+# Download a specific dataset
+python dataset_converter.py \
+  --source kaggle \
+  --name username/dataset-name \
+  --output-dir ./datasets
+```
 
 ## Evaluation Framework
 
@@ -133,6 +215,53 @@ The evaluation harness tests:
 ✅ Checkpoint saving with messages
 ✅ Docstrings and comments
 ✅ Clean, readable code structure
+
+## 🔍 Dataset Search Features
+
+### How it Works
+
+The dataset search pipeline uses multiple components:
+
+1. **Prompt Parser** (`dataset_search.py`):
+   - Uses GPT-4o-mini to parse natural language prompts
+   - Extracts task type (classification/regression)
+   - Identifies data type (image/text/tabular)
+   - Generates optimized search keywords
+
+2. **Multi-Source Search**:
+   - **Kaggle API**: Searches 1000+ public datasets
+   - **HuggingFace Hub**: Searches ML-specific datasets
+   - Ranks results by relevance and popularity
+
+3. **Auto-Detection & Conversion** (`dataset_converter.py`):
+   - Detects dataset format automatically
+   - Supports:
+     - CSV files (direct use)
+     - Image folders (class-based structure)
+     - HuggingFace datasets (Arrow/Parquet)
+   - Converts to standardized CSV format
+   - Handles train/test splitting
+
+### Supported Dataset Sources
+
+| Source | API Required | Formats Supported | Example |
+|--------|--------------|-------------------|---------|
+| Kaggle | Yes (free) | CSV, images, zip archives | `python search_and_build.py --prompt "dog breeds"` |
+| HuggingFace | Optional | Datasets library format | `python search_and_build.py --prompt "sentiment analysis"` |
+
+### Dataset Format Requirements
+
+The system expects CSV format:
+```
+label,pixel_0,pixel_1,...,pixel_N
+0,0.123,0.456,...,0.789
+1,0.234,0.567,...,0.890
+```
+
+For image datasets, the converter automatically:
+- Resizes images to consistent dimensions
+- Flattens to pixel values
+- Normalizes to [0, 1] range
 
 ## Configuration
 

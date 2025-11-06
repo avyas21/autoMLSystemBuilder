@@ -71,7 +71,12 @@ def infer_csv_properties(csv_path: Path) -> Dict[str, Any]:
                 n_classes = int(nunique)
         elif pd.api.types.is_float_dtype(df[tcol]):
             task = "regression"
-    return {"type": "csv", "n_columns": n_cols, "task": task, "n_classes": n_classes, "sample_head": df.head(3).to_dict(orient="records")}
+    # Limit sample data to avoid context length issues with high-dimensional data (e.g., images)
+    if n_cols > 100:
+        # For high-dimensional data, only include shape info, not actual samples
+        return {"type": "csv", "n_columns": n_cols, "task": task, "n_classes": n_classes, "sample_shape": f"{len(df)} rows × {n_cols} columns"}
+    else:
+        return {"type": "csv", "n_columns": n_cols, "task": task, "n_classes": n_classes, "sample_head": df.head(3).to_dict(orient="records")}
 
 
 def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
@@ -489,12 +494,128 @@ def agent_main(args):
     print(f"\nBest model saved as best_model.py with val_loss={best_loss}")
     
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--train", required=True, help="Path to training split (dir or csv)")
-    parser.add_argument("--val", required=True, help="Path to validation split (dir or csv)")
+    parser = argparse.ArgumentParser(
+        description="AutoML Agent - Generate ML models from datasets or natural language prompts",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Mode 1: Direct dataset paths
+  python agent.py --train data/train.csv --val data/test.csv
+
+  # Mode 2: Search and build from prompt
+  python agent.py --prompt "Build a classifier for handwritten digits" --max-results 5
+
+  # With custom output and iterations
+  python agent.py --train data/train.csv --val data/test.csv --output my_model.py --iterations 5
+        """
+    )
+
+    # Mode selection
+    mode_group = parser.add_argument_group('Mode: Choose one')
+    mode_group.add_argument("--prompt", type=str, help="Natural language task description (enables search mode)")
+    mode_group.add_argument("--train", type=str, help="Path to training split (dir or csv) (direct mode)")
+
+    # Common arguments
+    parser.add_argument("--val", type=str, help="Path to validation split (dir or csv)")
     parser.add_argument("--output", default="model.py", help="Output file for the generated model code")
     parser.add_argument("--instructions", default="", help="Extra instructions to include in prompt")
     parser.add_argument("--iterations", type=int, default=3, help="Number of model refinement iterations")
 
+    # Search mode arguments
+    search_group = parser.add_argument_group('Search Mode Options')
+    search_group.add_argument("--max-results", type=int, default=5, help="Max number of datasets to search (default: 5)")
+    search_group.add_argument("--select-dataset", type=int, default=1, help="Which dataset to use from results (default: 1)")
+    search_group.add_argument("--dataset-dir", type=str, default="./datasets", help="Directory to save datasets (default: ./datasets)")
+
     args = parser.parse_args()
-    agent_main(args)
+
+    # Validate arguments
+    if args.prompt and args.train:
+        parser.error("Cannot use both --prompt and --train. Choose one mode.")
+
+    if not args.prompt and not args.train:
+        parser.error("Must provide either --prompt (search mode) or --train (direct mode)")
+
+    # Execute appropriate mode
+    if args.prompt:
+        # Search mode: Find dataset, download, then generate code
+        print("="*80)
+        print("🤖 AutoML Agent - Search and Build Mode")
+        print("="*80)
+
+        from dataset_search import search_datasets
+        from dataset_converter import download_and_convert_dataset
+        import sys
+
+        # Step 1: Search for datasets
+        print(f"\n{'='*80}")
+        print("STEP 1: SEARCHING FOR DATASETS")
+        print("="*80)
+
+        requirements, datasets = search_datasets(args.prompt, max_results=args.max_results)
+
+        if not datasets:
+            print("\n❌ No datasets found. Please try a different prompt.")
+            sys.exit(1)
+
+        # Select dataset
+        selected_idx = args.select_dataset - 1
+        if selected_idx < 0 or selected_idx >= len(datasets):
+            print(f"\n⚠️  Invalid dataset selection: {args.select_dataset}")
+            print(f"   Valid range: 1-{len(datasets)}")
+            selected_idx = 0
+            print(f"   Using default: dataset 1")
+
+        selected_dataset = datasets[selected_idx]
+
+        print(f"\n✅ Selected dataset:")
+        print(f"   {selected_dataset['title']}")
+        print(f"   Source: {selected_dataset['source']}")
+        print(f"   URL: {selected_dataset['url']}")
+
+        # Step 2: Download and convert
+        print(f"\n{'='*80}")
+        print("STEP 2: DOWNLOADING AND CONVERTING DATASET")
+        print("="*80)
+
+        try:
+            train_csv, test_csv = download_and_convert_dataset(selected_dataset, args.dataset_dir)
+        except Exception as e:
+            print(f"\n❌ Failed to download/convert dataset: {e}")
+            print(f"\n💡 Tip: Make sure you have credentials configured:")
+            print(f"   - Kaggle: ~/.kaggle/kaggle.json")
+            print(f"   - HuggingFace: Run `huggingface-cli login`")
+            sys.exit(1)
+
+        # Update args for agent_main
+        args.train = train_csv
+        args.val = test_csv
+        if not args.instructions:
+            args.instructions = f"This is for the task: {args.prompt}"
+
+        # Step 3: Generate code
+        print(f"\n{'='*80}")
+        print("STEP 3: GENERATING MODEL CODE")
+        print("="*80)
+
+        agent_main(args)
+
+        print(f"\n{'='*80}")
+        print("🎉 AGENT COMPLETE!")
+        print("="*80)
+        print(f"\n📁 Generated files:")
+        print(f"   Dataset (train): {train_csv}")
+        print(f"   Dataset (test): {test_csv}")
+        print(f"   Model code: {args.output}")
+        print(f"   Best model: best_model.py")
+
+    else:
+        # Direct mode: Use provided dataset paths
+        if not args.val:
+            parser.error("--val is required when using --train (direct mode)")
+
+        print("="*80)
+        print("🤖 AutoML Agent - Direct Mode")
+        print("="*80)
+
+        agent_main(args)

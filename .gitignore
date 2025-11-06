@@ -42,7 +42,7 @@ generated/
 
 # Downloaded data
 data/
-datasets/*.csv
+# datasets/*.csv
 
 # Temporary files
 *.png
