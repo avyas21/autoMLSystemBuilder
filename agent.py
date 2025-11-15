@@ -456,13 +456,14 @@ def agent_main(args):
 
     # Start refinement loop
     best_code = files["model.py"]
+    code = best_code
     best_loss = float("inf")
 
     for i in range(args.iterations):
         print(f"\n=== Iteration {i + 1}/{args.iterations} ===")
 
         # Write and run model
-        write_model_file(best_code, args.output)
+        write_model_file(code, args.output)
         stdout, stderr = run_model(args.train, args.val)
 
         if stderr.strip():
@@ -479,11 +480,11 @@ def agent_main(args):
             print(f"✅ New best model found (Val Loss: {best_loss:.4f})")
 
         # Build refinement prompt using full logs + metrics
-        refine_prompt = build_refinement_prompt(best_code, stdout, metrics)
+        refine_prompt = build_refinement_prompt(code, stdout, metrics)
         refined_code = build_langgraph_pipeline(refine_prompt)
 
         if refined_code:
-            best_code = refined_code
+            code = refined_code
             print("Refinement iteration complete — model updated.")
         else:
             print("No refinement returned; stopping.")
