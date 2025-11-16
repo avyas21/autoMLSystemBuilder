@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from typing import Optional, Dict, Any
 import subprocess
 import re
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
@@ -121,8 +122,11 @@ def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
 # ---------- LLM prompt builder ----------
 def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions: Optional[str] = None) -> str:
     """
-    Build a clear prompt for ChatGPT to generate model.py and requirements.txt.
-    The assistant should return structured output with both files.
+    Build a prompt for generating model.py and requirements.txt.
+    Updated to:
+      - Handle CSV image datasets with automatic height/width inference.
+      - Assume 3 channels if number of pixels is not a perfect square.
+      - Ensures transfer learning compatibility.
     """
     lines = []
     lines.append("You are to generate TWO files:")
@@ -163,74 +167,72 @@ def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions
     lines.append("   - Add docstrings to functions")
     lines.append("   - Handle edge cases (empty datasets, etc.)")
     lines.append("")
-    lines.append("7. DEPENDENCIES - ONLY use these libraries (DO NOT import anything else):")
+    lines.append("7. DEPENDENCIES - ONLY use these libraries:")
     lines.append("   - torch (and torch.nn, torch.optim, torch.utils.data)")
     lines.append("   - pandas (for CSV reading)")
-    lines.append("   - numpy (if needed for array operations)")
-    lines.append("   DO NOT import: sklearn, scipy, torchvision (unless image_folder), matplotlib, seaborn")
+    lines.append("   - numpy (optional)")
+    lines.append("   - torchvision (ONLY for ImageFolder OR transfer learning)")
+    lines.append("   DO NOT import: sklearn, scipy, matplotlib, seaborn")
     lines.append("")
+
     lines.append("Dataset facts:")
     lines.append(json.dumps(facts, indent=2))
     lines.append("")
+
+    # -------------------------
+    # IMAGE FOLDER
+    # -------------------------
     if facts.get("split_type") == "image_folder":
         lines.append("DATASET TYPE: Image Folder")
-        lines.append("- Use torchvision.datasets.ImageFolder or custom Dataset")
-        lines.append("- Apply transforms: ToTensor(), Normalize()")
+        lines.append("- Use torchvision.datasets.ImageFolder")
+        lines.append("- Use transforms: Resize(224,224), ToTensor(), Normalize([...])")
+        lines.append("- Always use transfer learning (ResNet18) unless num_classes <=1")
         lines.append("- Input: channels={channels}, size={example_size}, classes={num_classes}".format(**facts))
-        lines.append("- Use CrossEntropyLoss for classification")
-        lines.append("- Architecture: Use a simple CNN (Conv2d -> Pool -> FC layers)")
+        lines.append("- Loss: CrossEntropyLoss")
+
+    # -------------------------
+    # CSV IMAGE DATA
+    # -------------------------
     elif facts.get("split_type") == "csv":
-        lines.append("DATASET TYPE: CSV Tabular Data")
-        lines.append("- Create custom Dataset class that reads CSV with pandas")
-        lines.append("- Normalize features: divide by 255.0 if pixel data, otherwise use standard scaling")
-        lines.append("- Architecture: Use MLP (Linear -> ReLU -> Linear layers)")
+        lines.append("DATASET TYPE: CSV Image Data")
+        lines.append("- CSV rows contain: label + flattened pixel values")
+        lines.append("- Automatically infer image shape and channels from row length:")
+        lines.append("      num_pixels = len(row) - 1  # exclude label")
+        lines.append("      if (num_pixels ** 0.5).is_integer():")
+        lines.append("          height = width = int(num_pixels ** 0.5)")
+        lines.append("          channels = 1  # single-channel grayscale")
+        lines.append("      else:")
+        lines.append("          height = width = int((num_pixels // 3) ** 0.5)")
+        lines.append("          channels = 3  # multi-channel image")
+        lines.append("- Reshape tensor:")
+        lines.append("      img = img.reshape(channels, height, width)")
+        lines.append("- Repeat channels to 3 if single-channel for transfer learning:")
+        lines.append("      if channels == 1:")
+        lines.append("          img = img.repeat(3, 1, 1)")
+        lines.append("- Do NOT use transforms.ToPILImage()")
+        lines.append("- Use tensor transforms: Resize(224,224), Normalize([...])")
         if facts.get("task") == "classification":
-            lines.append("- Task: Classification with {} classes".format(facts.get("n_classes", "unknown")))
+            lines.append(f"- Task: Classification with {facts.get('n_classes')} classes")
             lines.append("- Loss: CrossEntropyLoss")
             lines.append("- Metrics: Accuracy")
         else:
             lines.append("- Task: Regression")
             lines.append("- Loss: MSELoss")
             lines.append("- Metrics: RMSE or MAE")
+
+    # -------------------------
     else:
-        lines.append("Dataset type unknown; create flexible MLP template with TODOs")
+        lines.append("Dataset type unknown; create flexible transfer-learning template with TODOs")
+
+    lines.append("")
+    lines.append("MODEL ARCHITECTURE REQUIREMENTS:")
+    lines.append("- ALWAYS use transfer learning with torchvision.models.resnet18 pretrained=True")
+    lines.append("- Replace the final FC layer with correct output dimension.")
 
     lines.append("")
     lines.append("EXAMPLE STRUCTURE (follow this pattern):")
     lines.append("```")
-    lines.append("import argparse")
-    lines.append("import torch")
-    lines.append("import torch.nn as nn")
-    lines.append("# ... other imports")
-    lines.append("")
-    lines.append("class MyDataset(Dataset):")
-    lines.append("    # Dataset implementation")
-    lines.append("")
-    lines.append("class MyModel(nn.Module):")
-    lines.append("    # Model architecture")
-    lines.append("")
-    lines.append("def train(model, train_loader, criterion, optimizer, device, epochs):")
-    lines.append("    model.train()")
-    lines.append("    for epoch in range(epochs):")
-    lines.append("        total_loss = 0")
-    lines.append("        for data, target in train_loader:")
-    lines.append("            data, target = data.to(device), target.to(device)")
-    lines.append("            # ... training step")
-    lines.append("        avg_loss = total_loss / len(train_loader)")
-    lines.append("        # ... print and return metrics")
-    lines.append("")
-    lines.append("def validate(model, val_loader, criterion, device):")
-    lines.append("    model.eval()")
-    lines.append("    # ... validation logic with data.to(device)")
-    lines.append("")
-    lines.append("if __name__ == '__main__':")
-    lines.append("    parser = argparse.ArgumentParser()")
-    lines.append("    parser.add_argument('--train', required=True)")
-    lines.append("    parser.add_argument('--val', required=True)")
-    lines.append("    parser.add_argument('--epochs', type=int, default=10)")
-    lines.append("    # ... other args")
-    lines.append("    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
-    lines.append("    # ... setup and training")
+    lines.append("# Code outline...")
     lines.append("```")
     lines.append("")
 
@@ -239,22 +241,20 @@ def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions
         lines.append(additional_instructions)
         lines.append("")
 
-    lines.append("")
     lines.append("2. `requirements.txt` - List all pip packages needed (one per line)")
-    lines.append("   Include version constraints if important (e.g., torch>=2.0.0)")
-    lines.append("   Common packages: torch, pandas, numpy, scikit-learn, pillow")
+    lines.append("   Include version constraints if important.")
+    lines.append("   Packages: torch, torchvision, pandas, numpy, pillow")
     lines.append("")
     lines.append("OUTPUT FORMAT - Use this EXACT structure:")
     lines.append("=== requirements.txt ===")
     lines.append("package1")
     lines.append("package2>=version")
-    lines.append("package3")
     lines.append("")
     lines.append("=== model.py ===")
     lines.append("import package1")
-    lines.append("# ... rest of Python code")
+    lines.append("# ... rest of the file")
     lines.append("")
-    lines.append("IMPORTANT: Use the === markers exactly as shown. No markdown blocks (```), no extra explanations.")
+    lines.append("IMPORTANT: Use the === markers exactly as shown. No markdown code fences, no explanations.")
     return "\n".join(lines)
 
 def run_model(train_path, val_path):
@@ -438,6 +438,9 @@ def write_model_file(contents: str, output_path: str = "model.py") -> None:
         f.write(contents)
     print(f"Wrote {output_path}")
 
+def install_requirements(req_file="requirements.txt"):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
+
 
 def agent_main(args):
     facts = inspect_dataset(args.train, args.val)
@@ -453,6 +456,8 @@ def agent_main(args):
     print("✓ Obtained initial model from LangGraph pipeline.")
     files = parse_dual_output(llm_output)
     write_files(files)
+    install_requirements("requirements.txt")
+
 
     # Start refinement loop
     best_code = files["model.py"]
