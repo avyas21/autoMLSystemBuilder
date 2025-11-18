@@ -532,6 +532,9 @@ Examples:
     search_group.add_argument("--max-results", type=int, default=5, help="Max number of datasets to search (default: 5)")
     search_group.add_argument("--select-dataset", type=int, default=1, help="Which dataset to use from results (default: 1)")
     search_group.add_argument("--dataset-dir", type=str, default="./datasets", help="Directory to save datasets (default: ./datasets)")
+    search_group.add_argument("--sources", type=str, nargs='+',
+                             choices=['kaggle', 'huggingface', 'openml', 'paperswithcode', 'uci'],
+                             help="Data sources to search (default: kaggle huggingface paperswithcode uci)")
 
     args = parser.parse_args()
 
@@ -558,7 +561,11 @@ Examples:
         print("STEP 1: SEARCHING FOR DATASETS")
         print("="*80)
 
-        requirements, datasets = search_datasets(args.prompt, max_results=args.max_results)
+        requirements, datasets = search_datasets(
+            args.prompt,
+            max_results=args.max_results,
+            sources=args.sources
+        )
 
         if not datasets:
             print("\n❌ No datasets found. Please try a different prompt.")

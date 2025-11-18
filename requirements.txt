@@ -1,3 +1,11 @@
 torch>=2.0.0
 pandas
 numpy
+sentence-transformers>=2.2.0
+python-dotenv
+langchain-openai
+requests
+kaggle
+huggingface-hub
+openml
+gradio>=4.0.0

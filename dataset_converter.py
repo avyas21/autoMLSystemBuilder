@@ -31,19 +31,43 @@ def download_kaggle_dataset(dataset_ref: str, download_dir: str) -> str:
     """
     try:
         from kaggle.api.kaggle_api_extended import KaggleApi
+        import sys
 
         api = KaggleApi()
         api.authenticate()
 
-        print(f"📥 Downloading Kaggle dataset: {dataset_ref}")
+        print(f"\n📥 Downloading Kaggle dataset: {dataset_ref}")
+        print(f"   Target directory: {download_dir}")
+
+        # Get dataset size info
+        try:
+            dataset_metadata = api.dataset_view(dataset_ref)
+            size_bytes = dataset_metadata.totalBytes if hasattr(dataset_metadata, 'totalBytes') else 0
+            if size_bytes > 0:
+                size_mb = size_bytes / (1024 * 1024)
+                if size_mb > 1024:
+                    print(f"   Size: {size_mb/1024:.2f} GB")
+                else:
+                    print(f"   Size: {size_mb:.2f} MB")
+        except:
+            print(f"   Size: Unknown")
 
         # Create download directory
         os.makedirs(download_dir, exist_ok=True)
 
+        print(f"   ⏳ Downloading and extracting... (this may take several minutes)")
+        sys.stdout.flush()
+
         # Download and unzip dataset
         api.dataset_download_files(dataset_ref, path=download_dir, unzip=True)
 
-        print(f"✅ Downloaded to: {download_dir}")
+        print(f"   ✅ Downloaded to: {download_dir}")
+
+        # Show what was downloaded
+        files = list(Path(download_dir).rglob('*'))
+        file_count = len([f for f in files if f.is_file()])
+        print(f"   📁 {file_count} files extracted")
+
         return download_dir
 
     except ImportError:
@@ -66,11 +90,18 @@ def download_huggingface_dataset(dataset_name: str, download_dir: str, split: Op
     """
     try:
         from datasets import load_dataset
+        import sys
 
-        print(f"📥 Downloading HuggingFace dataset: {dataset_name}")
+        print(f"\n📥 Downloading HuggingFace dataset: {dataset_name}")
+        print(f"   Target directory: {download_dir}")
+        if split:
+            print(f"   Split: {split}")
 
         # Create download directory
         os.makedirs(download_dir, exist_ok=True)
+
+        print(f"   ⏳ Loading dataset... (streaming from HuggingFace)")
+        sys.stdout.flush()
 
         # Load dataset
         if split:
@@ -78,16 +109,27 @@ def download_huggingface_dataset(dataset_name: str, download_dir: str, split: Op
         else:
             dataset = load_dataset(dataset_name)
 
+        print(f"   💾 Saving to disk...")
+        sys.stdout.flush()
+
         # Save to directory
         if hasattr(dataset, 'save_to_disk'):
             dataset.save_to_disk(download_dir)
+            if hasattr(dataset, 'num_rows'):
+                print(f"   📊 {dataset.num_rows:,} examples saved")
         else:
             # If dataset is a DatasetDict, save each split
+            total_examples = 0
             for split_name, split_data in dataset.items():
                 split_path = os.path.join(download_dir, split_name)
                 split_data.save_to_disk(split_path)
+                if hasattr(split_data, 'num_rows'):
+                    total_examples += split_data.num_rows
+                    print(f"   📊 {split_name}: {split_data.num_rows:,} examples")
+            if total_examples > 0:
+                print(f"   📊 Total: {total_examples:,} examples")
 
-        print(f"✅ Downloaded to: {download_dir}")
+        print(f"   ✅ Downloaded to: {download_dir}")
         return download_dir
 
     except ImportError:
@@ -114,7 +156,9 @@ def convert_image_folder_to_csv(image_dir: str, output_csv: str, img_size: Tuple
         output_csv: Path to output CSV file
         img_size: Target image size (width, height)
     """
-    print(f"🔄 Converting image folder to CSV: {image_dir}")
+    print(f"\n🔄 Converting image folder to CSV: {image_dir}")
+    print(f"   Target size: {img_size}")
+    import sys
 
     data = []
     class_names = []
@@ -124,6 +168,22 @@ def convert_image_folder_to_csv(image_dir: str, output_csv: str, img_size: Tuple
 
     if not subdirs:
         raise Exception(f"No subdirectories found in {image_dir}. Expected ImageFolder structure with class subdirectories.")
+
+    print(f"   Found {len(subdirs)} classes")
+
+    # Count total images first
+    total_images = 0
+    for class_name in subdirs:
+        class_path = os.path.join(image_dir, class_name)
+        image_files = [f for f in os.listdir(class_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+        total_images += len(image_files)
+
+    print(f"   Total images: {total_images:,}")
+    print(f"   ⏳ Processing images...")
+    sys.stdout.flush()
+
+    processed_count = 0
+    last_progress = 0
 
     for class_idx, class_name in enumerate(subdirs):
         class_path = os.path.join(image_dir, class_name)
@@ -136,9 +196,17 @@ def convert_image_folder_to_csv(image_dir: str, output_csv: str, img_size: Tuple
             print(f"  ⚠️  Class {class_idx} '{class_name}': No images found, skipping")
             continue
 
-        print(f"  Processing class {class_idx} '{class_name}': {len(image_files)} images")
+        print(f"   📁 Class {class_idx} '{class_name}': {len(image_files)} images")
 
         for img_file in image_files:
+            processed_count += 1
+
+            # Show progress every 10%
+            progress = int((processed_count / total_images) * 100)
+            if progress >= last_progress + 10:
+                print(f"      Progress: {progress}% ({processed_count:,}/{total_images:,})")
+                sys.stdout.flush()
+                last_progress = progress
             img_path = os.path.join(class_path, img_file)
 
             try:
@@ -446,14 +514,29 @@ def download_and_convert_dataset(dataset_info: Dict, output_dir: str) -> Tuple[s
     Returns:
         Tuple of (train_csv_path, test_csv_path)
     """
+    import sys
+
     source = dataset_info['source']
     dataset_name = dataset_info['name']
+    dataset_title = dataset_info.get('title', dataset_name)
+
+    print(f"\n{'='*80}")
+    print(f"DATASET DOWNLOAD AND CONVERSION")
+    print(f"{'='*80}")
+    print(f"Dataset: {dataset_title}")
+    print(f"Source: {source.upper()}")
+    print(f"Output: {output_dir}")
+    sys.stdout.flush()
 
     # Create temporary download directory
     temp_dir = tempfile.mkdtemp(prefix='automl_dataset_')
 
     try:
         # Download dataset
+        print(f"\n[1/3] DOWNLOADING")
+        print(f"{'='*80}")
+        sys.stdout.flush()
+
         if source == 'kaggle':
             download_dir = download_kaggle_dataset(dataset_name, temp_dir)
         elif source == 'huggingface':
@@ -465,9 +548,17 @@ def download_and_convert_dataset(dataset_info: Dict, output_dir: str) -> Tuple[s
         os.makedirs(output_dir, exist_ok=True)
 
         # Convert to CSV (output_dir will persist after temp cleanup)
+        print(f"\n[2/3] CONVERTING TO CSV")
+        print(f"{'='*80}")
+        sys.stdout.flush()
+
         train_csv, test_csv = auto_detect_and_convert(download_dir, output_dir)
 
         # Validate CSV files have data
+        print(f"\n[3/3] VALIDATING")
+        print(f"{'='*80}")
+        sys.stdout.flush()
+
         train_df = pd.read_csv(train_csv)
         test_df = pd.read_csv(test_csv)
 
@@ -476,9 +567,16 @@ def download_and_convert_dataset(dataset_info: Dict, output_dir: str) -> Tuple[s
         if len(test_df) == 0:
             raise Exception(f"Test CSV is empty. Dataset conversion may have failed.")
 
-        print(f"\n✅ Dataset ready!")
-        print(f"   Train: {train_csv} ({len(train_df)} samples)")
-        print(f"   Test: {test_csv} ({len(test_df)} samples)")
+        print(f"   ✅ Train CSV: {len(train_df):,} samples, {len(train_df.columns)} columns")
+        print(f"   ✅ Test CSV: {len(test_df):,} samples, {len(test_df.columns)} columns")
+
+        print(f"\n{'='*80}")
+        print(f"✅ DATASET READY!")
+        print(f"{'='*80}")
+        print(f"   Train: {train_csv}")
+        print(f"   Test: {test_csv}")
+        print(f"{'='*80}\n")
+        sys.stdout.flush()
 
         return train_csv, test_csv
 
