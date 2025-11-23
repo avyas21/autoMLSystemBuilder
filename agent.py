@@ -21,6 +21,8 @@ OPENAI_MODEL = "gpt-4o-mini"  # Using mini model for faster/cheaper testing
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
+PROMPT_PATH = "model_agent_prompt.txt"
+
 # ---------- Helpers to inspect dataset ----------
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"}
 
@@ -118,9 +120,16 @@ def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
     facts["split_type"] = "unknown"
     return facts
 
-
 # ---------- LLM prompt builder ----------
-def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions: Optional[str] = None) -> str:
+def load_model_agent_prompt() -> str:
+    return open(PROMPT_PATH, "r").read()
+
+
+def save_model_agent_prompt(prompt: str):
+    with open(PROMPT_PATH, "w") as f:
+        f.write(prompt)
+
+def build_model_generation_prompt(facts: Dict[str, Any], description: str, additional_instructions: Optional[str] = None) -> str:
     """
     Build a prompt for generating model.py and requirements.txt.
     Updated to:
@@ -128,65 +137,19 @@ def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions
       - Assume 3 channels if number of pixels is not a perfect square.
       - Ensures transfer learning compatibility.
     """
+    prompt = load_model_agent_prompt()
+
+    facts_json = json.dumps(facts, indent=2)
+    
     lines = []
-    lines.append("You are to generate TWO files:")
-    lines.append("")
-    lines.append("1. `model.py` - A Python file that includes:")
-    lines.append("- A PyTorch model class (nn.Module) appropriate for the dataset.")
-    lines.append("- A `train()` function that trains the model for multiple epochs.")
-    lines.append("- A `validate()` function that evaluates the model on a validation dataset and reports metrics.")
-    lines.append("- An `if __name__ == '__main__'` block with argparse CLI.")
-    lines.append("")
-    lines.append("CRITICAL REQUIREMENTS:")
-    lines.append("")
-    lines.append("1. ARGPARSE INTERFACE - Use these EXACT argument names:")
-    lines.append("   --train (path to training data)")
-    lines.append("   --val (path to validation data)")
-    lines.append("   --epochs (number of epochs, default=10)")
-    lines.append("   --batch-size (batch size, default=64)")
-    lines.append("   --lr (learning rate, default=0.001)")
-    lines.append("")
-    lines.append("2. DEVICE HANDLING - MUST support both CPU and GPU:")
-    lines.append("   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
-    lines.append("   Move model and data to device in train/validate functions")
-    lines.append("")
-    lines.append("3. TRAINING LOOP - Proper structure:")
-    lines.append("   - Train function should accept epochs parameter and run full training loop")
-    lines.append("   - Print average loss per epoch (not just last batch)")
-    lines.append("   - In main: call train() ONCE with all epochs, not in a loop")
-    lines.append("")
-    lines.append("4. LOGGING - Print after each epoch:")
-    lines.append("   Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%")
-    lines.append("")
-    lines.append("5. CHECKPOINTING - Save model when validation metric improves:")
-    lines.append("   torch.save(model.state_dict(), 'best_model.pth')")
-    lines.append("   Print message when saving: 'Saved best model (Val Acc: XX.XX%)'")
-    lines.append("")
-    lines.append("6. CODE QUALITY:")
-    lines.append("   - Use proper variable names")
-    lines.append("   - Add docstrings to functions")
-    lines.append("   - Handle edge cases (empty datasets, etc.)")
-    lines.append("")
-    lines.append("7. DEPENDENCIES - ONLY use these libraries:")
-    lines.append("   - torch (and torch.nn, torch.optim, torch.utils.data)")
-    lines.append("   - pandas (for CSV reading)")
-    lines.append("   - numpy (optional)")
-    lines.append("   - torchvision (ONLY for ImageFolder OR transfer learning)")
-    lines.append("   DO NOT import: sklearn, scipy, matplotlib, seaborn")
-    lines.append("")
+    lines.append(f"- Task: Classification with {facts.get('n_classes')} classes")
+    lines.append("- Loss: CrossEntropyLoss")
+    lines.append("- Metrics: Accuracy")
 
-    lines.append("Dataset facts:")
-    lines.append(json.dumps(facts, indent=2))
-    lines.append("")
-
-    # -------------------------
-    # IMAGE FOLDER
-    # -------------------------
     if facts.get("split_type") == "image_folder":
         lines.append("DATASET TYPE: Image Folder")
         lines.append("- Use torchvision.datasets.ImageFolder")
         lines.append("- Use transforms: Resize(224,224), ToTensor(), Normalize([...])")
-        lines.append("- Always use transfer learning (ResNet18) unless num_classes <=1")
         lines.append("- Input: channels={channels}, size={example_size}, classes={num_classes}".format(**facts))
         lines.append("- Loss: CrossEntropyLoss")
 
@@ -206,56 +169,22 @@ def build_model_generation_prompt(facts: Dict[str, Any], additional_instructions
         lines.append("          channels = 3  # multi-channel image")
         lines.append("- Reshape tensor:")
         lines.append("      img = img.reshape(channels, height, width)")
-        lines.append("- Repeat channels to 3 if single-channel for transfer learning:")
+        lines.append("- Repeat channels to 3 if single-channel:")
         lines.append("      if channels == 1:")
         lines.append("          img = img.repeat(3, 1, 1)")
         lines.append("- Do NOT use transforms.ToPILImage()")
         lines.append("- Use tensor transforms: Resize(224,224), Normalize([...])")
-        if facts.get("task") == "classification":
-            lines.append(f"- Task: Classification with {facts.get('n_classes')} classes")
-            lines.append("- Loss: CrossEntropyLoss")
-            lines.append("- Metrics: Accuracy")
-        else:
-            lines.append("- Task: Regression")
-            lines.append("- Loss: MSELoss")
-            lines.append("- Metrics: RMSE or MAE")
 
-    # -------------------------
-    else:
-        lines.append("Dataset type unknown; create flexible transfer-learning template with TODOs")
-
-    lines.append("")
-    lines.append("MODEL ARCHITECTURE REQUIREMENTS:")
-    lines.append("- ALWAYS use transfer learning with torchvision.models.resnet18 pretrained=True")
-    lines.append("- Replace the final FC layer with correct output dimension.")
-
-    lines.append("")
-    lines.append("EXAMPLE STRUCTURE (follow this pattern):")
-    lines.append("```")
-    lines.append("# Code outline...")
-    lines.append("```")
-    lines.append("")
+    dataset_type_specific_handling = "\n".join(lines)
+    prompt = prompt.replace("{{facts_json_here}}", facts_json)
+    prompt = prompt.replace("{{dataset_description}}", description)
+    prompt = prompt.replace("{{dataset_type_specific_handling}}", dataset_type_specific_handling)
 
     if additional_instructions:
-        lines.append("ADDITIONAL INSTRUCTIONS:")
-        lines.append(additional_instructions)
-        lines.append("")
+        prompt += f"\n\nAdditional Instructions:\n{additional_instructions}\n"
 
-    lines.append("2. `requirements.txt` - List all pip packages needed (one per line)")
-    lines.append("   Include version constraints if important.")
-    lines.append("   Packages: torch, torchvision, pandas, numpy, pillow")
-    lines.append("")
-    lines.append("OUTPUT FORMAT - Use this EXACT structure:")
-    lines.append("=== requirements.txt ===")
-    lines.append("package1")
-    lines.append("package2>=version")
-    lines.append("")
-    lines.append("=== model.py ===")
-    lines.append("import package1")
-    lines.append("# ... rest of the file")
-    lines.append("")
-    lines.append("IMPORTANT: Use the === markers exactly as shown. No markdown code fences, no explanations.")
-    return "\n".join(lines)
+    print(prompt)
+    return prompt
 
 def run_model(train_path, val_path):
     cmd = ["python", "model.py", "--train", train_path, "--val", val_path]
@@ -288,7 +217,6 @@ def extract_metrics(output_text: str) -> Dict[str, Optional[float]]:
     }
 
     return metrics
-
 
 def build_refinement_prompt(prev_code: str, train_output: str, metrics: Dict[str, float]) -> str:
     """
@@ -387,6 +315,41 @@ def build_langgraph_pipeline(prompt: str) -> Optional[str]:
         return None
 
 
+def build_leader_prompt(model_prompt: str, best_model_code: str, model_training_output: str) -> str:
+
+    return f"""
+    You are the LEADER agent.
+
+    You DO NOT write code.  
+    You generate the FULL AND COMPLETE prompt for the MODEL AGENT to use on the next run.
+
+    Here is the current model agent prompt:
+    ---------------------------------------------------------
+    {model_prompt}
+    ---------------------------------------------------------
+
+    Here is the best performing model:
+    ---------------------------------------------------------
+    {best_model_code}
+    ---------------------------------------------------------
+
+    Here are the corresponding logs generated from training the model:
+    ---------------------------------------------------------
+    {model_training_output}
+    ---------------------------------------------------------
+
+    Your task:
+    - Analyze the problems, failures, performance, architecture, training behavior.
+    - Create a brand-new, fully rewritten Model Agent Prompt.
+    - This new prompt must contain EVERYTHING the Model Agent needs to generate a future model.py.
+    - Keep both performance and duration of model training in mind. 
+    - DO NOT reference past prompts; produce a full standalone prompt.
+    - DO NOT output code.
+    - Output ONLY the prompt text, no extra delimiters.
+
+    New MODEL AGENT prompt:
+    """
+
 
 
 # ---------- Main agent logic ----------
@@ -444,7 +407,7 @@ def install_requirements(req_file="requirements.txt"):
 
 def agent_main(args):
     facts = inspect_dataset(args.train, args.val)
-    prompt = build_model_generation_prompt(facts, additional_instructions=args.instructions)
+    prompt = build_model_generation_prompt(facts, args.description, additional_instructions=args.instructions)
 
     # First model generation
     print("Calling LLM to generate initial code and dependencies...")
@@ -463,6 +426,7 @@ def agent_main(args):
     best_code = files["model.py"]
     code = best_code
     best_loss = float("inf")
+    best_std_out = ""
 
     for i in range(args.iterations):
         print(f"\n=== Iteration {i + 1}/{args.iterations} ===")
@@ -482,6 +446,7 @@ def agent_main(args):
         if metrics.get("val_loss") is not None and metrics["val_loss"] < best_loss:
             best_loss = metrics["val_loss"]
             best_code = open(args.output).read()
+            best_std_out = stdout
             print(f"✅ New best model found (Val Loss: {best_loss:.4f})")
 
         # Build refinement prompt using full logs + metrics
@@ -497,6 +462,10 @@ def agent_main(args):
 
     # Write best final version
     write_model_file(best_code, "best_model.py")
+    leader_prompt = build_leader_prompt(load_model_agent_prompt(), best_code, best_std_out)
+    new_model_prompt = build_langgraph_pipeline(leader_prompt).strip()
+    print(new_model_prompt)
+
     print(f"\nBest model saved as best_model.py with val_loss={best_loss}")
     
 if __name__ == "__main__":
@@ -525,6 +494,8 @@ Examples:
     parser.add_argument("--val", type=str, help="Path to validation split (dir or csv)")
     parser.add_argument("--output", default="model.py", help="Output file for the generated model code")
     parser.add_argument("--instructions", default="", help="Extra instructions to include in prompt")
+    parser.add_argument("--description", help="Description of the dataset/task")
+
     parser.add_argument("--iterations", type=int, default=3, help="Number of model refinement iterations")
 
     # Search mode arguments
