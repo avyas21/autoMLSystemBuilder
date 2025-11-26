@@ -174,7 +174,7 @@ def build_model_generation_prompt(facts: Dict[str, Any], description: str, addit
         lines.append("          img = img.repeat(3, 1, 1)")
         lines.append("- Do NOT use transforms.ToPILImage()")
         lines.append("- Use tensor transforms: Resize(224,224), Normalize([...])")
-
+        lines.append("If the dataset contains grayscale images that must be expanded to 3 channels, the model.py MUST first convert the NumPy image array into a torch tensor BEFORE calling .repeat()")
     dataset_type_specific_handling = "\n".join(lines)
     prompt = prompt.replace("{{facts_json_here}}", facts_json)
     prompt = prompt.replace("{{dataset_description}}", description)
@@ -464,8 +464,8 @@ def agent_main(args):
     write_model_file(best_code, "best_model.py")
     leader_prompt = build_leader_prompt(load_model_agent_prompt(), best_code, best_std_out)
     new_model_prompt = build_langgraph_pipeline(leader_prompt).strip()
-    print(new_model_prompt)
-
+    #print(new_model_prompt)
+    save_model_agent_prompt(new_model_prompt)
     print(f"\nBest model saved as best_model.py with val_loss={best_loss}")
     
 if __name__ == "__main__":
