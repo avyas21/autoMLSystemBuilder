@@ -4,45 +4,34 @@ You are to generate TWO files:
 
 -   A PyTorch model class (nn.Module) appropriate for the dataset.
 -   A train() function that trains the model for multiple epochs.
--   A validate() function that evaluates the model on a validation
-    dataset and reports metrics.
+-   A validate() function that evaluates the model on a validation dataset and reports metrics.
 -   An if __name__ == '__main__' block with argparse CLI.
 
 CRITICAL REQUIREMENTS:
 
-1.  ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to
-    training data) --val (path to validation data) --epochs (number of
-    epochs) --batch-size (batch size) --lr
-    (learning rate). Default the epochs, batchsize and learning rate to whatever makes sense.
+1.  ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to training data) --val (path to validation data) --epochs (number of epochs) --batch-size (batch size) --lr (learning rate). Default the epochs, batch size, and learning rate to reasonable values based on common practices.
 
-2.  DEVICE HANDLING - MUST support both CPU and GPU: device =
-    torch.device(‘cuda’ if torch.cuda.is_available() else ‘cpu’) Move
-    model and data to device in train/validate functions
+2.  DEVICE HANDLING - MUST support both CPU and GPU: device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'). Ensure that the model and data are moved to the appropriate device in both train() and validate() functions.
 
 3.  TRAINING LOOP - Proper structure:
+    -   The train function should accept epochs as a parameter and run the full training loop.
+    -   Print the average loss per epoch (not just the last batch).
+    -   In the main block, call train() ONCE with all epochs, not in a loop.
 
-    -   Train function should accept epochs parameter and run full
-        training loop
-    -   Print average loss per epoch (not just last batch)
-    -   In main: call train() ONCE with all epochs, not in a loop
+4.  LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%.
 
-4.  LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX,
-    Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%
-
-5.  CHECKPOINTING - Save model when validation metric improves:
-    torch.save(model.state_dict(), ‘best_model.pth’) Print message when
-    saving: ‘Saved best model (Val Acc: XX.XX%)’
+5.  CHECKPOINTING - Save the model when the validation metric improves: torch.save(model.state_dict(), 'best_model.pth'). Print a message when saving: 'Saved best model (Val Acc: XX.XX%)'.
 
 6.  CODE QUALITY:
-    -   Use proper variable names
-    -   Add docstrings to functions
-    -   Handle edge cases (empty datasets, etc.)
+    -   Use clear and descriptive variable names.
+    -   Add docstrings to all functions.
+    -   Handle edge cases (e.g., empty datasets, etc.).
 
 7.  DEPENDENCIES - ONLY use these libraries:
     -   torch (and torch.nn, torch.optim, torch.utils.data)
     -   pandas (for CSV reading)
     -   numpy (optional)
-    -   torchvision (ONLY for ImageFolder OR transfer learning) 
+    -   torchvision (ONLY for ImageFolder OR transfer learning)
 
 Dataset Description: {{dataset_description}}
 
@@ -51,22 +40,19 @@ Dataset schema facts: {{facts_json_here}}
 Dataset type Specific handling: 
 {{dataset_type_specific_handling}}
 
-
 MODEL ARCHITECTURE REQUIREMENTS: 
-- Goal is to get >90% accuracy
-- Use the simplest architecture that would get good results.
-- Use transfer learning if it makes sense for the problem. If using transfer learning, freeze all pretrained weights.
-- Use best fitting deep learning architecture for the dataset
-- Replace the final FC layer with correct output dimension.
+- Aim for >90% accuracy.
+- Use the simplest architecture that would yield good results.
+- Utilize transfer learning if applicable; if using transfer learning, freeze all pretrained weights.
+- Select the best fitting deep learning architecture for the dataset.
+- Replace the final fully connected layer with the correct output dimension based on the dataset.
 
 EXAMPLE STRUCTURE (follow this pattern):
-```
-    # Code outline...
-```
 
-2.  requirements.txt - List all pip packages needed (one per line)
-    Include version constraints if important. Packages: torch,
-    torchvision, pandas, numpy, pillow
+    # Code outline...
+
+
+2.  requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
 
 OUTPUT FORMAT - Use this EXACT structure: 
 === requirements.txt ===
@@ -76,5 +62,4 @@ package2>=version
 === model.py === 
 import package1 # … rest of the file
 
-IMPORTANT: Use the === markers exactly as shown. No markdown code
-fences, no explanations.
+IMPORTANT: Use the === markers exactly as shown. No markdown code fences, no explanations.
