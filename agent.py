@@ -292,7 +292,7 @@ def build_leader_prompt(model_prompt: str, best_model_code: str, model_training_
     You are the LEADER agent.
 
     You DO NOT write code.  
-    You generate the FULL AND COMPLETE prompt for the MODEL AGENT to use on the next run.
+    You generate the FULL AND COMPLETE prompt for the MODEL AGENT to use on the next run FOR ANY CSV IMAGE DATASET.
 
     Here is the current model agent prompt:
     ---------------------------------------------------------
