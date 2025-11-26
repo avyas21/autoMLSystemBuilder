@@ -146,35 +146,6 @@ def build_model_generation_prompt(facts: Dict[str, Any], description: str, addit
     lines.append("- Loss: CrossEntropyLoss")
     lines.append("- Metrics: Accuracy")
 
-    if facts.get("split_type") == "image_folder":
-        lines.append("DATASET TYPE: Image Folder")
-        lines.append("- Use torchvision.datasets.ImageFolder")
-        lines.append("- Use transforms: Resize(224,224), ToTensor(), Normalize([...])")
-        lines.append("- Input: channels={channels}, size={example_size}, classes={num_classes}".format(**facts))
-        lines.append("- Loss: CrossEntropyLoss")
-
-    # -------------------------
-    # CSV IMAGE DATA
-    # -------------------------
-    elif facts.get("split_type") == "csv":
-        lines.append("DATASET TYPE: CSV Image Data")
-        lines.append("- CSV rows contain: label + flattened pixel values")
-        lines.append("- Automatically infer image shape and channels from row length:")
-        lines.append("      num_pixels = len(row) - 1  # exclude label")
-        lines.append("      if (num_pixels ** 0.5).is_integer():")
-        lines.append("          height = width = int(num_pixels ** 0.5)")
-        lines.append("          channels = 1  # single-channel grayscale")
-        lines.append("      else:")
-        lines.append("          height = width = int((num_pixels // 3) ** 0.5)")
-        lines.append("          channels = 3  # multi-channel image")
-        lines.append("- Reshape tensor:")
-        lines.append("      img = img.reshape(channels, height, width)")
-        lines.append("- Repeat channels to 3 if single-channel:")
-        lines.append("      if channels == 1:")
-        lines.append("          img = img.repeat(3, 1, 1)")
-        lines.append("- Do NOT use transforms.ToPILImage()")
-        lines.append("- Use tensor transforms: Resize(224,224), Normalize([...])")
-        lines.append("If the dataset contains grayscale images that must be expanded to 3 channels, the model.py MUST first convert the NumPy image array into a torch tensor BEFORE calling .repeat()")
     dataset_type_specific_handling = "\n".join(lines)
     prompt = prompt.replace("{{facts_json_here}}", facts_json)
     prompt = prompt.replace("{{dataset_description}}", description)
@@ -463,8 +434,9 @@ def agent_main(args):
     # Write best final version
     write_model_file(best_code, "best_model.py")
     leader_prompt = build_leader_prompt(load_model_agent_prompt(), best_code, best_std_out)
+    print(leader_prompt)
     new_model_prompt = build_langgraph_pipeline(leader_prompt).strip()
-    #print(new_model_prompt)
+    print(new_model_prompt)
     save_model_agent_prompt(new_model_prompt)
     print(f"\nBest model saved as best_model.py with val_loss={best_loss}")
     

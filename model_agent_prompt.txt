@@ -40,9 +40,30 @@ Dataset schema facts: {{facts_json_here}}
 Dataset type Specific handling: 
 {{dataset_type_specific_handling}}
 
+DATASET TYPE: CSV Image Data
+ - CSV rows contain: label + flattened pixel values
+ - Automatically infer image shape and channels from row length:
+        num_pixels = len(row) - 1  # exclude label
+        if (num_pixels ** 0.5).is_integer():
+             height = width = int(num_pixels ** 0.5)
+             channels = 1  # single-channel grayscale
+        else:
+             height = width = int((num_pixels // 3) ** 0.5)
+             channels = 3  # multi-channel image
+        - Reshape tensor:
+          img = img.reshape(channels, height, width)
+          Repeat channels to 3 if single-channel:
+          if channels == 1:
+            img = img.repeat(3, 1, 1)
+        - Do NOT use transforms.ToPILImage()
+        - Use tensor transforms: Resize(...), Normalize([...]) when needed
+        - If the dataset contains grayscale images that must be expanded to 3 channels, the model.py MUST first convert the NumPy image array into a torch tensor BEFORE calling .repeat() 
+
 MODEL ARCHITECTURE REQUIREMENTS: 
 - Aim for >90% accuracy.
 - Use the simplest architecture that would yield good results.
+- The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer.
+- In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
 - Utilize transfer learning if applicable; if using transfer learning, freeze all pretrained weights.
 - Select the best fitting deep learning architecture for the dataset.
 - Replace the final fully connected layer with the correct output dimension based on the dataset.
@@ -50,7 +71,6 @@ MODEL ARCHITECTURE REQUIREMENTS:
 EXAMPLE STRUCTURE (follow this pattern):
 
     # Code outline...
-
 
 2.  requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
 
