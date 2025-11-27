@@ -1,38 +1,38 @@
 You are to generate TWO files:
 
-1.  model.py - A Python file that includes:
+1. model.py - A Python file that includes:
 
--   A PyTorch model class (nn.Module) appropriate for the dataset.
--   A train() function that trains the model for multiple epochs.
--   A validate() function that evaluates the model on a validation dataset and reports metrics.
--   An if __name__ == '__main__' block with argparse CLI.
--   Only output the code
+- A PyTorch model class (nn.Module) appropriate for the dataset.
+- A train() function that trains the model for multiple epochs.
+- A validate() function that evaluates the model on a validation dataset and reports metrics.
+- An if __name__ == '__main__' block with argparse CLI.
+- Only output the code
 
 CRITICAL REQUIREMENTS:
 
-1.  ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to training data) --val (path to validation data) --epochs (number of epochs) --batch-size (batch size) --lr (learning rate). Default the epochs, batch size, and learning rate to reasonable values based on common practices.
+1. ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to training data) --val (path to validation data) --epochs (number of epochs) --batch-size (batch size) --lr (learning rate). Default the epochs, batch size, and learning rate to reasonable values based on common practices.
 
-2.  DEVICE HANDLING - MUST support both CPU and GPU: device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'). Ensure that the model and data are moved to the appropriate device in both train() and validate() functions.
+2. DEVICE HANDLING - MUST support both CPU and GPU: device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'). Ensure that the model and data are moved to the appropriate device in both train() and validate() functions.
 
-3.  TRAINING LOOP - Proper structure:
-    -   The train function should accept epochs as a parameter and run the full training loop.
-    -   Print the average loss per epoch (not just the last batch).
-    -   In the main block, call train() ONCE with all epochs, not in a loop.
+3. TRAINING LOOP - Proper structure:
+   - The train function should accept epochs as a parameter and run the full training loop.
+   - Print the average loss per epoch (not just the last batch).
+   - In the main block, call train() ONCE with all epochs, not in a loop.
 
-4.  LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%.
+4. LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%.
 
-5.  CHECKPOINTING - Save the model when the validation metric improves: torch.save(model.state_dict(), 'best_model.pth'). Print a message when saving: 'Saved best model (Val Acc: XX.XX%)'.
+5. CHECKPOINTING - Save the model when the validation metric improves: torch.save(model.state_dict(), 'best_model.pth'). Print a message when saving: 'Saved best model (Val Acc: XX.XX%)'.
 
-6.  CODE QUALITY:
-    -   Use clear and descriptive variable names.
-    -   Add docstrings to all functions.
-    -   Handle edge cases (e.g., empty datasets, etc.).
+6. CODE QUALITY:
+   - Use clear and descriptive variable names.
+   - Add docstrings to all functions.
+   - Handle edge cases (e.g., empty datasets, etc.).
 
-7.  DEPENDENCIES - ONLY use these libraries:
-    -   torch (and torch.nn, torch.optim, torch.utils.data)
-    -   pandas (for CSV reading)
-    -   numpy (optional)
-    -   torchvision (ONLY for ImageFolder OR transfer learning)
+7. DEPENDENCIES - ONLY use these libraries:
+   - torch (and torch.nn, torch.optim, torch.utils.data)
+   - pandas (for CSV reading)
+   - numpy (optional)
+   - torchvision (ONLY for ImageFolder OR transfer learning)
 
 Dataset Description: {{dataset_description}}
 
@@ -42,36 +42,36 @@ Dataset type Specific handling:
 {{dataset_type_specific_handling}}
 
 DATASET TYPE: CSV Image Data
- - CSV rows contain: label + flattened pixel values
- - Automatically infer image shape and channels from row length:
-        num_pixels = len(row) - 1  # exclude label
-        if (num_pixels ** 0.5).is_integer():
-             height = width = int(num_pixels ** 0.5)
-             channels = 1  # single-channel grayscale
-        else:
-             height = width = int((num_pixels // 3) ** 0.5)
-             channels = 3  # multi-channel image
- - After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
-       - Convert NumPy → PIL using transforms.ToPILImage()
-       - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
-       - Convert back to tensor using transforms.ToTensor()        
- - transforms must run on PIL images, NOT on raw tensors
- - Correct preprocessing pipeline MUST be:
-        img = img.reshape(H, W, C)
-        img = transforms.ToPILImage()(img)
-        img = transform_pipeline(img)  
- - Normalization MUST use ImageNet statistics when using pretrained models:
-        mean = [0.485, 0.456, 0.406]
-        std  = [0.229, 0.224, 0.225]
- - If the image is grayscale, convert to 3-channel AFTER converting to tensor:
-        if tensor.shape[0] == 1:
-            tensor = tensor.repeat(3,1,1)
+- CSV rows contain: label + flattened pixel values
+- Automatically infer image shape and channels from row length:
+      num_pixels = len(row) - 1  # exclude label
+      if (num_pixels ** 0.5).is_integer():
+           height = width = int(num_pixels ** 0.5)
+           channels = 1  # single-channel grayscale
+      else:
+           height = width = int((num_pixels // 3) ** 0.5)
+           channels = 3  # multi-channel image
+- After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
+      - Convert NumPy → PIL using transforms.ToPILImage()
+      - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
+      - Convert back to tensor using transforms.ToTensor()        
+- transforms must run on PIL images, NOT on raw tensors
+- Correct preprocessing pipeline MUST be:
+      img = img.reshape(H, W, C)
+      img = transforms.ToPILImage()(img)
+      img = transform_pipeline(img)  
+- Normalization MUST use ImageNet statistics when using pretrained models:
+      mean = [0.485, 0.456, 0.406]
+      std  = [0.229, 0.224, 0.225]
+- If the image is grayscale, convert to 3-channel AFTER converting to tensor:
+      if tensor.shape[0] == 1:
+          tensor = tensor.repeat(3,1,1)
 
 MODEL ARCHITECTURE REQUIREMENTS: 
 - Transfer learning must be preferred when it improves accuracy. If transfer learning fits the dataset (e.g., 3-channel images), the generated model.py should:
     - Use a pretrained model such as ResNet18 or MobileNetV3
     - Freeze all pretrained layers:
-        for param in model.parameters():
+        for param in self.base_model.parameters():
             param.requires_grad = False
 
     - Replace the classifier head with a new Linear layer of correct output size
@@ -87,7 +87,7 @@ EXAMPLE STRUCTURE (follow this pattern):
 
     # Code outline...
 
-2.  requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
+2. requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
 
 OUTPUT FORMAT - Use this EXACT structure: 
 === requirements.txt ===
