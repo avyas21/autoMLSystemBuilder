@@ -1,133 +1,145 @@
 import argparse
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.utils.data as data
-import pandas as pd
-import numpy as np
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms, models
+from PIL import Image
 
-class MyDataset(data.Dataset):
-    """Custom Dataset for loading CSV data."""
+class CIFAR100Dataset(Dataset):
+    """Custom dataset for loading CIFAR100 images from a CSV file."""
     
-    def __init__(self, csv_file):
+    def __init__(self, csv_file, transform=None):
         self.data_frame = pd.read_csv(csv_file)
-        self.features = self.data_frame.iloc[:, :-1].values / 255.0  # Normalize pixel values
-        self.labels = self.data_frame.iloc[:, -1].values
+        self.transform = transform
 
     def __len__(self):
         return len(self.data_frame)
 
     def __getitem__(self, idx):
-        return torch.tensor(self.features[idx], dtype=torch.float32), torch.tensor(self.labels[idx], dtype=torch.long)
+        row = self.data_frame.iloc[idx]
+        label = row[0]
+        img = row[1:].values.astype(np.uint8)
+        num_pixels = len(img)
+        
+        if (num_pixels ** 0.5).is_integer():
+            height = width = int(num_pixels ** 0.5)
+            channels = 1
+        else:
+            height = width = int((num_pixels // 3) ** 0.5)
+            channels = 3
+        
+        img = img.reshape(height, width, channels)
+        img = transforms.ToPILImage()(img)
+        
+        if self.transform:
+            img = self.transform(img)
+        
+        return img, label
 
-class MyModel(nn.Module):
-    """Improved MLP model for classification with dropout and batch normalization."""
+class CIFAR100Model(nn.Module):
+    """Model for CIFAR100 classification using transfer learning."""
     
-    def __init__(self, input_size, num_classes):
-        super(MyModel, self).__init__()
-        self.fc1 = nn.Linear(input_size, 1024)
-        self.bn1 = nn.BatchNorm1d(1024)
-        self.relu = nn.ReLU()
-        self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(1024, 512)
-        self.bn2 = nn.BatchNorm1d(512)
-        self.dropout2 = nn.Dropout(0.5)
-        self.fc3 = nn.Linear(512, 256)
-        self.bn3 = nn.BatchNorm1d(256)
-        self.dropout3 = nn.Dropout(0.5)
-        self.fc4 = nn.Linear(256, num_classes)
+    def __init__(self):
+        super(CIFAR100Model, self).__init__()
+        self.base_model = models.resnet18(pretrained=True)
+        for param in self.base_model.parameters():
+            param.requires_grad = False
+        
+        # Dummy forward pass to compute flatten size
+        dummy_input = torch.zeros(1, 3, 32, 32)
+        self.flatten_size = self.base_model.fc.in_features
+        
+        self.base_model.fc = nn.Linear(self.flatten_size, 100)  # 100 classes for CIFAR100
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.dropout1(x)
-        x = self.fc2(x)
-        x = self.bn2(x)
-        x = self.relu(x)
-        x = self.dropout2(x)
-        x = self.fc3(x)
-        x = self.bn3(x)
-        x = self.relu(x)
-        x = self.dropout3(x)
-        x = self.fc4(x)
+        x = self.base_model(x)
         return x
 
 def train(model, train_loader, criterion, optimizer, device, epochs):
     """Train the model for a specified number of epochs."""
-    model.to(device)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, factor=0.5)
+    model.train()
     for epoch in range(epochs):
-        model.train()
-        total_loss = 0
+        running_loss = 0.0
         correct = 0
         total = 0
         
-        for data, target in train_loader:
-            data, target = data.to(device), target.to(device)
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             
-            total_loss += loss.item()
-            _, predicted = torch.max(output.data, 1)
-            total += target.size(0)
-            correct += (predicted == target).sum().item()
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
         
-        avg_loss = total_loss / len(train_loader)
-        train_accuracy = 100 * correct / total
-        val_loss, val_accuracy = validate(model, val_loader, criterion, device)
-        
-        print(f'Epoch {epoch + 1}/{epochs}: Train Loss: {avg_loss:.4f}, Train Acc: {train_accuracy:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_accuracy:.2f}%')
-
-        # Save the model if validation accuracy improves
-        if val_accuracy > train_accuracy:
-            torch.save(model.state_dict(), 'best_model.pth')
-            print(f'Saved best model (Val Acc: {val_accuracy:.2f}%)')
-
-        scheduler.step(val_loss)
+        avg_loss = running_loss / len(train_loader)
+        accuracy = 100 * correct / total
+        print(f'Epoch {epoch + 1}/{epochs}: Train Loss: {avg_loss:.4f}, Train Acc: {accuracy:.2f}%')
 
 def validate(model, val_loader, criterion, device):
-    """Evaluate the model on the validation dataset."""
+    """Validate the model on the validation dataset."""
     model.eval()
-    val_loss = 0
+    running_loss = 0.0
     correct = 0
     total = 0
     
     with torch.no_grad():
-        for data, target in val_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            loss = criterion(output, target)
-            val_loss += loss.item()
-            _, predicted = torch.max(output.data, 1)
-            total += target.size(0)
-            correct += (predicted == target).sum().item()
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
     
-    avg_val_loss = val_loss / len(val_loader)
-    val_accuracy = 100 * correct / total
-    return avg_val_loss, val_accuracy
+    avg_loss = running_loss / len(val_loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', required=True, help='Path to training data')
-    parser.add_argument('--val', required=True, help='Path to validation data')
-    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
-    parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+    parser.add_argument('--train', required=True, help='path to training data')
+    parser.add_argument('--val', required=True, help='path to validation data')
+    parser.add_argument('--epochs', type=int, default=10, help='number of epochs')
+    parser.add_argument('--batch-size', type=int, default=32, help='batch size')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    train_dataset = MyDataset(args.train)
-    val_dataset = MyDataset(args.val)
-    train_loader = data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    transform_pipeline = transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
 
-    model = MyModel(input_size=784, num_classes=10)
+    train_dataset = CIFAR100Dataset(args.train, transform=transform_pipeline)
+    val_dataset = CIFAR100Dataset(args.val, transform=transform_pipeline)
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+
+    model = CIFAR100Model().to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    train(model, train_loader, criterion, optimizer, device, args.epochs)
+    best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        train(model, train_loader, criterion, optimizer, device, 1)
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        print(f'Epoch {epoch + 1}/{args.epochs}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'best_model.pth')
+            print(f'Saved best model (Val Acc: {val_acc:.2f}%)')

@@ -282,3 +282,79 @@ Refinement iteration complete — model updated.
 
 === Iteration 3/3 ===
 Wrote model.py
+Epoch 1/1: Train Loss: 3.9423, Train Acc: 15.96%
+Epoch 1/30: Val Loss: 3.0602, Val Acc: 36.13%
+Saved best model (Val Acc: 36.13%)
+Epoch 1/1: Train Loss: 3.5231, Train Acc: 24.42%
+Epoch 2/30: Val Loss: 2.7909, Val Acc: 39.96%
+Saved best model (Val Acc: 39.96%)
+Epoch 1/1: Train Loss: 3.4512, Train Acc: 25.95%
+Epoch 3/30: Val Loss: 2.6713, Val Acc: 42.21%
+Saved best model (Val Acc: 42.21%)
+Epoch 1/1: Train Loss: 3.4199, Train Acc: 26.60%
+Epoch 4/30: Val Loss: 2.5870, Val Acc: 42.92%
+Saved best model (Val Acc: 42.92%)
+Epoch 1/1: Train Loss: 3.3986, Train Acc: 27.09%
+Epoch 5/30: Val Loss: 2.5495, Val Acc: 44.43%
+Saved best model (Val Acc: 44.43%)
+Epoch 1/1: Train Loss: 3.3796, Train Acc: 27.43%
+Epoch 6/30: Val Loss: 2.5021, Val Acc: 45.92%
+Saved best model (Val Acc: 45.92%)
+Epoch 1/1: Train Loss: 3.3696, Train Acc: 27.78%
+Epoch 7/30: Val Loss: 2.4987, Val Acc: 45.05%
+Epoch 1/1: Train Loss: 3.3651, Train Acc: 27.73%
+Epoch 8/30: Val Loss: 2.4752, Val Acc: 44.74%
+Epoch 1/1: Train Loss: 3.3658, Train Acc: 27.83%
+Epoch 9/30: Val Loss: 2.4718, Val Acc: 45.20%
+Epoch 1/1: Train Loss: 3.3457, Train Acc: 28.56%
+Epoch 10/30: Val Loss: 2.4516, Val Acc: 45.95%
+Saved best model (Val Acc: 45.95%)
+Epoch 1/1: Train Loss: 3.2553, Train Acc: 30.15%
+Epoch 11/30: Val Loss: 2.3732, Val Acc: 49.35%
+Saved best model (Val Acc: 49.35%)
+Epoch 1/1: Train Loss: 3.2363, Train Acc: 30.41%
+Epoch 12/30: Val Loss: 2.3698, Val Acc: 49.84%
+Saved best model (Val Acc: 49.84%)
+
+Epoch 1/1: Train Loss: 3.2456, Train Acc: 30.16%
+Epoch 13/30: Val Loss: 2.3945, Val Acc: 48.32%
+Epoch 1/1: Train Loss: 3.2392, Train Acc: 30.47%
+Epoch 14/30: Val Loss: 2.3875, Val Acc: 48.64%
+Epoch 1/1: Train Loss: 3.2331, Train Acc: 30.55%
+Epoch 15/30: Val Loss: 2.3814, Val Acc: 49.37%
+Epoch 1/1: Train Loss: 3.2270, Train Acc: 30.64%
+Epoch 16/30: Val Loss: 2.3595, Val Acc: 49.72%
+Epoch 1/1: Train Loss: 3.2468, Train Acc: 30.16%
+
+Epoch 17/30: Val Loss: 2.3854, Val Acc: 49.48%
+Epoch 1/1: Train Loss: 3.2222, Train Acc: 30.79%
+Epoch 18/30: Val Loss: 2.3851, Val Acc: 49.92%
+Saved best model (Val Acc: 49.92%)
+Epoch 1/1: Train Loss: 3.2227, Train Acc: 30.74%
+Epoch 19/30: Val Loss: 2.3901, Val Acc: 49.49%
+Epoch 1/1: Train Loss: 3.2145, Train Acc: 30.88%
+Epoch 20/30: Val Loss: 2.3955, Val Acc: 49.53%
+Epoch 1/1: Train Loss: 3.2158, Train Acc: 31.09%
+Epoch 21/30: Val Loss: 2.3790, Val Acc: 50.37%
+Saved best model (Val Acc: 50.37%)
+Epoch 1/1: Train Loss: 3.2122, Train Acc: 31.19%
+Epoch 22/30: Val Loss: 2.3745, Val Acc: 50.24%
+Epoch 1/1: Train Loss: 3.2063, Train Acc: 31.39%
+Epoch 23/30: Val Loss: 2.3688, Val Acc: 50.26%
+Epoch 1/1: Train Loss: 3.2135, Train Acc: 30.90%
+Epoch 24/30: Val Loss: 2.3768, Val Acc: 50.65%
+Saved best model (Val Acc: 50.65%)
+Epoch 1/1: Train Loss: 3.2098, Train Acc: 31.06%
+Epoch 25/30: Val Loss: 2.3901, Val Acc: 49.89%
+Epoch 1/1: Train Loss: 3.2147, Train Acc: 31.05%
+Epoch 26/30: Val Loss: 2.3881, Val Acc: 49.92%
+
+Epoch 1/1: Train Loss: 3.2115, Train Acc: 30.98%
+Epoch 27/30: Val Loss: 2.3721, Val Acc: 50.59%
+Epoch 1/1: Train Loss: 3.2164, Train Acc: 30.98%
+Epoch 28/30: Val Loss: 2.3862, Val Acc: 50.28%
+Epoch 1/1: Train Loss: 3.2094, Train Acc: 30.94%
+Epoch 29/30: Val Loss: 2.3591, Val Acc: 50.78%
+Saved best model (Val Acc: 50.78%)
+Epoch 1/1: Train Loss: 3.2263, Train Acc: 30.69%
+Epoch 30/30: Val Loss: 2.3889, Val Acc: 50.49%
