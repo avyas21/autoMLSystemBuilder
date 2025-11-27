@@ -6,6 +6,7 @@ You are to generate TWO files:
 -   A train() function that trains the model for multiple epochs.
 -   A validate() function that evaluates the model on a validation dataset and reports metrics.
 -   An if __name__ == '__main__' block with argparse CLI.
+-   Only output the code
 
 CRITICAL REQUIREMENTS:
 
