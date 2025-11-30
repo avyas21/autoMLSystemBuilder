@@ -44,7 +44,23 @@ Dataset type Specific handling:
 
 {{dataset_generation_code}}
 
-DATASET TYPE: CSV Image Data
+If the dataset type is huggingface arrow:
+- Use huggingface datasets to load data: 
+      from datasets import load_dataset
+      train_hf = load_dataset(<Use whatever is passed as --train argument and remove train at end of path if it exists>, split="train")
+      test_hf = load_dataset(<Use whatever is passed as --test argument and remove test at end of path if it exists>, split="test")
+- The dataset contains:
+ - image feature: either a PIL image or a NumPy array representing pixel values.
+ - label feature: ClassLabel 
+- Labels must be loaded as int and num_classes must be computed from the label feature to set the model output size:
+  num_classes = train_hf.features['label'].num_classes
+- If image is a NumPy array:
+     -Reshape to (H, W, C) where: 
+        - If num_pixels = image.size is a perfect square → grayscale, C=1
+        - Otherwise → C=3 for color images
+     -Convert to PIL: img = transforms.ToPILImage()(image)
+
+If the dataset type is CSV Image Data:
 - CSV rows contain: label + flattened pixel values
 - MAKE SURE to only divide the pixel values by 255 if they are not already in the range 0 - 1. Also make sure to load pixel values as float.
 - Make sure the label is loaded as int.
@@ -57,6 +73,8 @@ DATASET TYPE: CSV Image Data
       else:
            height = width = int((num_pixels // 3) ** 0.5)
            channels = 3  # multi-channel image
+
+APPLY to all datasets (CSV or huggingface):
 - After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
       - Convert NumPy → PIL using transforms.ToPILImage()
       - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
@@ -75,9 +93,9 @@ DATASET TYPE: CSV Image Data
       if tensor.shape[0] == 1:
           tensor = tensor.repeat(3,1,1).
 
-MODEL ARCHITECTURE REQUIREMENTS: 
-- Transfer learning must be preferred when it improves accuracy. If transfer learning fits the dataset (e.g., 3-channel images), the generated model.py should:
-    - Use a pretrained model such as ResNet18 or MobileNetV3.
+MODEL ARCHITECTURE REQUIREMENTS:
+- (CRITICAL / MUST FOLLOW) The generated model.py should:
+    - Use a pretrained model such as ResNet18 or MobileNetV3. 
     - ONLY freeze all the pretrained layers if the image dataset is compatible with ImageNet out of the box:
         for param in self.base_model.parameters():
             param.requires_grad = False.
@@ -89,9 +107,6 @@ MODEL ARCHITECTURE REQUIREMENTS:
                param.requires_grad = False.
     - Replace the classifier head with a new Linear layer of correct output size.
     - Use adaptive pooling or a dummy forward pass to compute flatten size dynamically.
-
-- If transfer learning is NOT appropriate:
-  - (e.g., tiny grayscale dataset), generate a small CNN.
 - Aim for >90% accuracy.
 - The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer. Define all layers used in forward() before calling the flatten-size computation helper.
 - In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
