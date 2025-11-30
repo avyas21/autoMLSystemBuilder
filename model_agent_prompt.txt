@@ -1,8 +1,6 @@
 You are to generate TWO files:
 
 1. model.py - A Python file that includes:
-
-- A PyTorch model class (nn.Module) appropriate for the dataset.
 - A train() function that trains the model for multiple epochs.
 - A validate() function that evaluates the model on a validation dataset and reports metrics.
 - An if __name__ == '__main__' block with argparse CLI.
@@ -35,6 +33,22 @@ CRITICAL REQUIREMENTS:
    - numpy (optional)
    - torchvision (ONLY for ImageFolder OR transfer learning)
 
+8. MODEL CLASS - Use a pretrained model such as ResNet18 or MobileNetV3 UNLESS IT IS A VERY SIMPLE DATASET.
+    - ONLY freeze all the pretrained layers if the image dataset is compatible with ImageNet out of the box:
+        for param in self.base_model.parameters():
+            param.requires_grad = False.
+    - If the image dataset is not compatible with ImageNet, allow finetuning on the last X layers of the pretrained model based on what makes sense. Here is an example:
+        for name, param in self.base_model.named_parameters():
+            if "layer3" in name or "layer4" in name or "fc" in name:
+              param.requires_grad = True.
+            else:
+               param.requires_grad = False.
+    - Replace the classifier head with a new Linear layer of correct output size.
+    - Use adaptive pooling or a dummy forward pass to compute flatten size dynamically.
+- Aim for >90% accuracy.
+- The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer. Define all layers used in forward() before calling the flatten-size computation helper.
+- In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
+
 Dataset Description: {{dataset_description}}
 
 Dataset schema facts: {{facts_json_here}}
@@ -59,6 +73,10 @@ If the dataset type is huggingface:
         - If num_pixels = image.size is a perfect square → grayscale, C=1
         - Otherwise → C=3 for color images
      -Convert to PIL: img = transforms.ToPILImage()(image)
+- The preprocess function used with .map() MUST return a dict with keys 'image' and 'label', NEVER a tuple.
+- DataLoaders must use collate_fn to convert dicts to (images, labels) batches.
+- Apply torchvision transforms on PIL images, then convert to tensor.
+- Convert single-channel grayscale tensors to 3 channels when using pretrained models.
 
 If the dataset type is CSV Image Data:
 - CSV rows contain: label + flattened pixel values
@@ -74,7 +92,7 @@ If the dataset type is CSV Image Data:
            height = width = int((num_pixels // 3) ** 0.5)
            channels = 3  # multi-channel image
 
-APPLY to all datasets (CSV or huggingface):
+FOR BOTH CSV AND HUGGINGFACE DATASET:
 - After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
       - Convert NumPy → PIL using transforms.ToPILImage()
       - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
@@ -92,24 +110,6 @@ APPLY to all datasets (CSV or huggingface):
 - If the image is grayscale, convert to 3-channel AFTER converting to tensor:
       if tensor.shape[0] == 1:
           tensor = tensor.repeat(3,1,1).
-
-MODEL ARCHITECTURE REQUIREMENTS (MUST MEET ALL THESE REQUIREMENTS):
-- The generated model.py should:
-    - Use a pretrained model such as ResNet18 or MobileNetV3. 
-    - ONLY freeze all the pretrained layers if the image dataset is compatible with ImageNet out of the box:
-        for param in self.base_model.parameters():
-            param.requires_grad = False.
-    - If the image dataset is not compatible with ImageNet, allow finetuning on the last X layers of the pretrained model based on what makes sense. Here is an example:
-        for name, param in self.base_model.named_parameters():
-            if "layer3" in name or "layer4" in name or "fc" in name:
-              param.requires_grad = True.
-            else:
-               param.requires_grad = False.
-    - Replace the classifier head with a new Linear layer of correct output size.
-    - Use adaptive pooling or a dummy forward pass to compute flatten size dynamically.
-- Aim for >90% accuracy.
-- The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer. Define all layers used in forward() before calling the flatten-size computation helper.
-- In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
 
 EXAMPLE STRUCTURE (follow this pattern):
 
