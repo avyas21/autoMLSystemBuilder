@@ -81,7 +81,38 @@ def infer_csv_properties(csv_path: Path) -> Dict[str, Any]:
     else:
         return {"type": "csv", "n_columns": n_cols, "task": task, "n_classes": n_classes, "sample_head": df.head(3).to_dict(orient="records")}
 
+def infer_hf_dataset_properties(dataset_dir: Path) -> Dict[str, Any]:
+    """
+    Infer basic properties from a HuggingFace Arrow dataset folder.
+    Requires `datasets` library.
+    """
+    try:
+        from datasets import Dataset
 
+        # Find arrow shards
+        arrow_files = list(dataset_dir.glob("*.arrow"))
+        if not arrow_files:
+            raise ValueError(f"No .arrow files found in {dataset_dir}")
+        # IMPORTANT: convert Path → string
+        first_arrow = str(arrow_files[0])
+
+        # Load single arrow shard
+        ds = Dataset.from_file(first_arrow)
+
+        num_rows = ds.num_rows
+        num_classes = ds.features['label'].num_classes
+        return {
+            "type": "huggingface_dataset",
+            "num_rows": num_rows,
+            "n_classes": num_classes
+        }
+
+    except Exception as e:
+        return {
+            "type": "huggingface_dataset",
+            "error": str(e),
+        }
+        
 def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
     """
     Try to infer dataset type and key properties from the provided split directories/paths.
@@ -92,6 +123,13 @@ def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
     p_train = Path(train_path)
     p_val = Path(val_path)
     try:
+        if p_train.is_dir():
+            arrow_files = list(p_train.glob("*.arrow"))
+            if arrow_files:
+                props = infer_hf_dataset_properties(p_train)
+                facts.update(props)
+                facts["split_type"] = "huggingface"
+                return facts
         # If train path is a directory containing subdirectories -> likely image folder
         if p_train.is_dir():
             # quick check: does it contain subdirectories with image files?
@@ -124,12 +162,24 @@ def inspect_dataset(train_path: str, val_path: str) -> Dict[str, Any]:
 def load_model_agent_prompt() -> str:
     return open(PROMPT_PATH, "r").read()
 
+def read_model_file() -> str:
+    return open("model.py", "r").read()
 
 def save_model_agent_prompt(prompt: str):
     with open(PROMPT_PATH, "w") as f:
         f.write(prompt)
 
-def build_model_generation_prompt(facts: Dict[str, Any], description: str, additional_instructions: Optional[str] = None) -> str:
+def read_dataset_generation_file(filepath_str):
+    filepath = Path(filepath_str)
+    if filepath.is_file():
+        with open(filepath, 'r') as file:
+            return "Dataset was generated using this code:\n" + file.read()
+    else:
+        print(f"Path is not a valid file or does not exist: {filepath_str}")
+        return ""
+
+
+def build_model_generation_prompt(facts: Dict[str, Any], description: str, dataset_generation_code_file: str, additional_instructions: Optional[str] = None) -> str:
     """
     Build a prompt for generating model.py and requirements.txt.
     Updated to:
@@ -150,6 +200,9 @@ def build_model_generation_prompt(facts: Dict[str, Any], description: str, addit
     prompt = prompt.replace("{{facts_json_here}}", facts_json)
     prompt = prompt.replace("{{dataset_description}}", description)
     prompt = prompt.replace("{{dataset_type_specific_handling}}", dataset_type_specific_handling)
+
+    dataset_generation_code = read_dataset_generation_file(dataset_generation_code_file)
+    prompt = prompt.replace("{{dataset_generation_code}}", dataset_generation_code)
 
     if additional_instructions:
         prompt += f"\n\nAdditional Instructions:\n{additional_instructions}\n"
@@ -221,7 +274,7 @@ def build_refinement_prompt(prev_code: str, train_output: str, metrics: Dict[str
         - Keep the same CLI interface (arguments: --train, --val)
         - The output must remain a **runnable single-file Python script**.
         - Output *only* the Python code for model.py — no explanations or markdown.
-
+        - If the accuracy is very low and the model is not using pretrained network like resnet, change architecture to use pretrained network
         Previous model.py:
 
         {prev_code.strip()}
@@ -377,33 +430,36 @@ def install_requirements(req_file="requirements.txt"):
 
 
 def agent_main(args):
-    facts = inspect_dataset(args.train, args.val)
-    prompt = build_model_generation_prompt(facts, args.description, additional_instructions=args.instructions)
+    if (not args.continueRun > 0):
+        facts = inspect_dataset(args.train, args.val)
+        prompt = build_model_generation_prompt(facts, args.description, args.generationCode, additional_instructions=args.instructions)
 
-    # First model generation
-    print("Calling LLM to generate initial code and dependencies...")
-    llm_output = build_langgraph_pipeline(prompt)
-    if not llm_output:
-        print("✗ Initial model generation failed.")
-        return
+        # First model generation
+        print("Calling LLM to generate initial code and dependencies...")
+    
+        llm_output = build_langgraph_pipeline(prompt)
+        if not llm_output:
+            print("✗ Initial model generation failed.")
+            return
 
-    print("✓ Obtained initial model from LangGraph pipeline.")
-    files = parse_dual_output(llm_output)
-    write_files(files)
-    install_requirements("requirements.txt")
-
+        print("✓ Obtained initial model from LangGraph pipeline.")
+        files = parse_dual_output(llm_output)
+        write_files(files)
+        install_requirements("requirements.txt")
 
     # Start refinement loop
-    best_code = files["model.py"]
+    best_code = files["model.py"] if args.continueRun == 0 else read_model_file()
     code = best_code
     best_loss = float("inf")
     best_std_out = ""
 
-    for i in range(args.iterations):
+    for i in range(args.continueRun, args.iterations):
         print(f"\n=== Iteration {i + 1}/{args.iterations} ===")
 
         # Write and run model
         write_model_file(code, args.output)
+        print(code)
+        print("\n")
         stdout, stderr = run_model(args.train, args.val)
 
         if stderr.strip():
@@ -421,7 +477,7 @@ def agent_main(args):
             print(f"✅ New best model found (Val Loss: {best_loss:.4f})")
 
         # Build refinement prompt using full logs + metrics
-        refine_prompt = build_refinement_prompt(code, stdout, metrics)
+        refine_prompt = build_refinement_prompt(code, stderr + "\n" + stdout, metrics)
         refined_code = build_langgraph_pipeline(refine_prompt)
 
         if refined_code:
@@ -467,9 +523,13 @@ Examples:
     parser.add_argument("--output", default="model.py", help="Output file for the generated model code")
     parser.add_argument("--instructions", default="", help="Extra instructions to include in prompt")
     parser.add_argument("--description", help="Description of the dataset/task")
+    parser.add_argument("--generationCode", help="Code used to generate dataset", default="")
+    parser.add_argument("--modelPromptFile", help="Model prompt file", default=PROMPT_PATH)
+
 
     parser.add_argument("--iterations", type=int, default=3, help="Number of model refinement iterations")
-
+    parser.add_argument("--continueRun", type=int, default=0, help="If training is interrupted, set this to the iteration you want to continue from")
+                        
     # Search mode arguments
     search_group = parser.add_argument_group('Search Mode Options')
     search_group.add_argument("--max-results", type=int, default=5, help="Max number of datasets to search (default: 5)")
@@ -480,6 +540,7 @@ Examples:
                              help="Data sources to search (default: kaggle huggingface paperswithcode uci)")
 
     args = parser.parse_args()
+    PROMPT_PATH = args.modelPromptFile
 
     # Validate arguments
     if args.prompt and args.train:

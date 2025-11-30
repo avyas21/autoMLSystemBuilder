@@ -1,0 +1,14 @@
+{
+	"iteration1": {
+		"loss": 1.4309,
+		"accuracy": 63.41
+	},	
+	"iteration2": {
+		"loss": 0.7699,
+		"accuracy": 78.61
+	},
+	"iteration3": {
+		"loss": 0.5461,
+		"accuracy": 84.84
+	}
+}
