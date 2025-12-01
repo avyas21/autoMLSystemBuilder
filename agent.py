@@ -281,7 +281,7 @@ def build_refinement_prompt(prev_code: str, train_output: str, metrics: Dict[str
         - Modify the code to improve model performance.
         - You may change:
         - Model architecture (depth, layers, dropout, normalization, etc.)
-        - If model is using a pretrained network, consider unfreezing the weights for the last X layers based on recommended practices.
+        - If model is using a pretrained network, consider unfreezing the weights on more of the layers.
         - Learning rate, optimizer, batch size, or scheduler
         - Data augmentations or regularization
         - Keep the same CLI interface (arguments: --train, --val)
