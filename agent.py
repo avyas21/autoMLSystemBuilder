@@ -100,7 +100,19 @@ def infer_hf_dataset_properties(dataset_dir: Path) -> Dict[str, Any]:
         ds = Dataset.from_file(first_arrow)
 
         num_rows = ds.num_rows
-        num_classes = ds.features['label'].num_classes
+
+        label_feature = ds.features["label"]
+
+        # --- Robust num_classes detection ---
+        if hasattr(label_feature, "num_classes"):
+            # Case 1: ClassLabel
+            num_classes = label_feature.num_classes
+        else:
+            # Case 2: Value(int) -> infer unique labels
+            # Efficient: take unique from arrow without loading all
+            unique_vals = ds.unique("label")
+            num_classes = len(unique_vals)
+
         return {
             "type": "huggingface_dataset",
             "num_rows": num_rows,
@@ -269,6 +281,7 @@ def build_refinement_prompt(prev_code: str, train_output: str, metrics: Dict[str
         - Modify the code to improve model performance.
         - You may change:
         - Model architecture (depth, layers, dropout, normalization, etc.)
+        - If model is using a pretrained network, consider unfreezing the weights for the last X layers based on recommended practices.
         - Learning rate, optimizer, batch size, or scheduler
         - Data augmentations or regularization
         - Keep the same CLI interface (arguments: --train, --val)

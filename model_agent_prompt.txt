@@ -64,10 +64,21 @@ If the dataset type is huggingface:
       train_hf = load_dataset(<Use whatever is passed as --train argument and remove train at end of path if it exists>, split="train")
       test_hf = load_dataset(<Use whatever is passed as --test argument and remove test at end of path if it exists>, split="test")
 - The dataset contains:
- - image feature: either a PIL image or a NumPy array representing pixel values.
- - label feature: ClassLabel 
+ - image feature: either a PIL image or a NumPy array or list representing pixel values. 
+       - If image is list, convert it to numpy array with dtype uint8.
+       - image preprocessing must be able to handle both PIL image and numpy array image input
+ - label feature: ClassLabel or int64 Value 
 - Labels must be loaded as int and num_classes must be computed from the label feature to set the model output size:
-  num_classes = train_hf.features['label'].num_classes
+     - label_feature = train_hf.features["label"]
+       # --- Robust num_classes detection ---
+       if hasattr(label_feature, "num_classes"):
+           # Case 1: ClassLabel
+           num_classes = label_feature.num_classes
+       else:
+           # Case 2: Value(int) -> infer unique labels
+           # Efficient: take unique from arrow without loading all
+           unique_vals = ds.unique("label")
+           num_classes = len(unique_vals)
 - If image is a NumPy array:
      -Reshape to (H, W, C) where: 
         - If num_pixels = image.size is a perfect square → grayscale, C=1

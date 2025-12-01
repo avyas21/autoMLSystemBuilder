@@ -1,121 +1,68 @@
-#!/usr/bin/env python3
-"""
-Download FGVC Aircraft dataset and convert to CSV format.
-Images are resized to 224x224 and flattened into CSV rows:
-[label, pixel_0, pixel_1, ..., pixel_N]
-"""
-
 import os
-import tarfile
-import urllib.request
-from pathlib import Path
-import numpy as np
-import pandas as pd
+from torchvision.datasets import FGVCAircraft
+from torchvision import transforms
 from PIL import Image
+import numpy as np
+from datasets import Dataset, concatenate_datasets
 
-# -----------------------------------------
-# URLs
-# -----------------------------------------
+OUT_DIR = "fgvc_aircraft_processed"
+IMAGE_SIZE = (224, 224)
+ROOT = "fgvc_aircraft_raw"   # where torchvision stores original dataset
 
-AIRCRAFT_URL = "https://www.robots.ox.ac.uk/~vgg/data/fgvc-aircraft/archives/fgvc-aircraft-2013b.tar.gz"
+# Resize + convert transform
+transform = transforms.Compose([
+    transforms.Resize(IMAGE_SIZE, interpolation=Image.Resampling.LANCZOS),
+    transforms.ConvertImageDtype(torch.float32) if False else None,  # kept for clarity
+])
 
-DATA_DIR = Path("./data")
-CSV_DIR = Path("./datasets")
-DATA_DIR.mkdir(exist_ok=True)
-CSV_DIR.mkdir(exist_ok=True)
+def load_split(split):
+    """
+    Loads FGVCAircraft split using torchvision and returns a HuggingFace Dataset.
+    """
+    tv_dataset = FGVCAircraft(
+        root=ROOT,
+        split=split,
+        annotation_level="variant",  # same labels as official FGVC benchmark
+        download=True
+    )
 
-tar_path = DATA_DIR / "fgvc-aircraft-2013b.tar.gz"
+    images = []
+    labels = []
 
-# -----------------------------------------
-# Download dataset
-# -----------------------------------------
+    print(f"Loading split: {split}")
 
-if not tar_path.exists():
-    print("Downloading FGVC Aircraft dataset...")
-    urllib.request.urlretrieve(AIRCRAFT_URL, tar_path)
-    print("✓ Download complete.")
-else:
-    print("Archive already exists, skipping download.")
+    for img, label in tv_dataset:
+        img = img.convert("RGB").resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
+        images.append(np.array(img))
+        labels.append(int(label))
 
-# -----------------------------------------
-# Extract dataset
-# -----------------------------------------
+    # Convert to HF dataset
+    return Dataset.from_dict({
+        "image": images,
+        "label": labels,
+    })
 
-EXTRACTED_DIR = DATA_DIR / "fgvc-aircraft-2013b"
+def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
 
-if not EXTRACTED_DIR.exists():
-    print("Extracting dataset...")
-    with tarfile.open(tar_path, "r:gz") as tar:
-        tar.extractall(DATA_DIR)
-    print("✓ Extraction complete.")
-else:
-    print("Dataset already extracted, skipping.")
+    # Load splits
+    train_ds = load_split("train")
+    val_ds = load_split("val")
+    test_ds = load_split("test")
 
-# -----------------------------------------
-# Load split files
-# -----------------------------------------
+    # Merge train + val
+    print("Merging train + val → train_combined")
+    train_combined = concatenate_datasets([train_ds, val_ds])
 
-def load_split_list(filename):
-    path = EXTRACTED_DIR / "data" / filename
-    with open(path) as f:
-        return [line.strip() for line in f]
+    # Save as HF arrow datasets
+    print("Saving training set...")
+    train_combined.save_to_disk(f"{OUT_DIR}/train")
 
-train_list = load_split_list("images_train.txt")
-val_list   = load_split_list("images_val.txt")
-test_list  = load_split_list("images_test.txt")
+    print("Saving test set...")
+    test_ds.save_to_disk(f"{OUT_DIR}/test")
 
-# Load class labels
-labels_file = EXTRACTED_DIR / "data" / "images_variant_labels.txt"
-label_map = {}
+    print("Done!")
 
-with open(labels_file) as f:
-    for i, line in enumerate(f):
-        img, label = line.strip().split(" ", 1)
-        label_map[img] = label
+if __name__ == "__main__":
+    main()
 
-# Convert labels to integer classes
-unique_classes = sorted(list(set(label_map.values())))
-class_to_idx = {c: i for i, c in enumerate(unique_classes)}
-
-print(f"Found {len(unique_classes)} aircraft classes.")
-
-# -----------------------------------------
-# Convert to CSV
-# -----------------------------------------
-
-def convert_split_to_csv(split_name, image_list, output_csv):
-    print(f"\nProcessing split: {split_name} ({len(image_list)} images)")
-
-    rows = []
-    target_size = (224, 224)
-
-    for img_name in image_list:
-        img_path = EXTRACTED_DIR / "data" / "images" / (img_name + ".jpg")
-        label_str = label_map[img_name]
-        label_idx = class_to_idx[label_str]
-
-        try:
-            img = Image.open(img_path).convert("RGB")
-        except Exception:
-            print("Skipping unreadable:", img_path)
-            continue
-
-        img = img.resize(target_size)
-        img_array = np.array(img).flatten()
-
-        row = [label_idx] + img_array.tolist()
-        rows.append(row)
-
-    columns = ["label"] + [f"pixel_{i}" for i in range(224 * 224 * 3)]
-    df = pd.DataFrame(rows, columns=columns)
-    df.to_csv(CSV_DIR / output_csv, index=False)
-
-    print(f"✓ Saved {output_csv} ({len(df)} samples)")
-
-
-convert_split_to_csv("train", train_list, "fgvc_aircraft_train.csv")
-convert_split_to_csv("val",   val_list,   "fgvc_aircraft_val.csv")
-convert_split_to_csv("test",  test_list,  "fgvc_aircraft_test.csv")
-
-print("\n✓ FGVC Aircraft dataset converted successfully!")
-print("CSV files available in ./datasets/")

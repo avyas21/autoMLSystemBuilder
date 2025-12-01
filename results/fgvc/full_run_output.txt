@@ -1,0 +1,1249 @@
+================================================================================
+🤖 AutoML Agent - Direct Mode
+================================================================================
+Path is not a valid file or does not exist: 
+You are to generate TWO files:
+
+1. model.py - A Python file that includes:
+- A train() function that trains the model for multiple epochs.
+- A validate() function that evaluates the model on a validation dataset and reports metrics.
+- An if __name__ == '__main__' block with argparse CLI.
+- Only output the code.
+
+CRITICAL REQUIREMENTS:
+
+1. ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to training data) --val (path to validation data) --epochs (number of epochs) --batch-size (batch size) --lr (learning rate). Default the epochs, batch size, and learning rate to reasonable values based on common practices.
+
+2. DEVICE HANDLING - MUST support both CPU and GPU: device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'). Ensure that the model and data are moved to the appropriate device in both train() and validate() functions.
+
+3. TRAINING LOOP - Proper structure:
+   - The train function should accept epochs as a parameter and run the full training loop. Move model and data to device inside the function.
+   - train() should be called with epochs = 1 if train is being in a loop of epochs.
+   - Print the average loss per epoch (not just the last batch).
+   - In the main block, call train() ONCE with all epochs, not in a loop.
+
+4. LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%.
+
+5. CHECKPOINTING - Save the model when the validation metric improves: torch.save(model.state_dict(), 'best_model.pth'). Print a message when saving: 'Saved best model (Val Acc: XX.XX%)'.
+
+6. CODE QUALITY:
+   - Use clear and descriptive variable names.
+   - Add docstrings to all functions.
+   - Handle edge cases (e.g., empty datasets, etc.).
+
+7. DEPENDENCIES - ONLY use these libraries:
+   - torch (and torch.nn, torch.optim, torch.utils.data)
+   - pandas (for CSV reading)
+   - numpy (optional)
+   - torchvision (ONLY for ImageFolder OR transfer learning)
+
+8. MODEL CLASS - Use a pretrained model such as ResNet18 or MobileNetV3 UNLESS IT IS A VERY SIMPLE DATASET.
+    - ONLY freeze all the pretrained layers if the image dataset is compatible with ImageNet out of the box:
+        for param in self.base_model.parameters():
+            param.requires_grad = False.
+    - If the image dataset is not compatible with ImageNet, allow finetuning on the last X layers of the pretrained model based on what makes sense. Here is an example:
+        for name, param in self.base_model.named_parameters():
+            if "layer3" in name or "layer4" in name or "fc" in name:
+              param.requires_grad = True.
+            else:
+               param.requires_grad = False.
+    - Replace the classifier head with a new Linear layer of correct output size.
+    - Use adaptive pooling or a dummy forward pass to compute flatten size dynamically.
+- Aim for >90% accuracy.
+- The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer. Define all layers used in forward() before calling the flatten-size computation helper.
+- In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
+
+Dataset Description: FGCV aircraft dataset
+
+Dataset schema facts: {
+  "train_path": "datasets/fgvc_aircraft_processed/train/",
+  "val_path": "datasets/fgvc_aircraft_processed/test/",
+  "type": "huggingface_dataset",
+  "num_rows": 1334,
+  "n_classes": 40,
+  "split_type": "huggingface"
+}
+
+Dataset type Specific handling: 
+- Task: Classification with 40 classes
+- Loss: CrossEntropyLoss
+- Metrics: Accuracy
+
+
+
+If the dataset type is huggingface:
+- Use huggingface datasets to load data: 
+      from datasets import load_dataset
+      train_hf = load_dataset(<Use whatever is passed as --train argument and remove train at end of path if it exists>, split="train")
+      test_hf = load_dataset(<Use whatever is passed as --test argument and remove test at end of path if it exists>, split="test")
+- The dataset contains:
+ - image feature: either a PIL image or a NumPy array or list representing pixel values. 
+       - If image is list, convert it to numpy array with dtype uint8.
+       - image preprocessing must be able to handle both PIL image and numpy array image input
+ - label feature: ClassLabel or int64 Value 
+- Labels must be loaded as int and num_classes must be computed from the label feature to set the model output size:
+     - label_feature = train_hf.features["label"]
+       # --- Robust num_classes detection ---
+       if hasattr(label_feature, "num_classes"):
+           # Case 1: ClassLabel
+           num_classes = label_feature.num_classes
+       else:
+           # Case 2: Value(int) -> infer unique labels
+           # Efficient: take unique from arrow without loading all
+           unique_vals = ds.unique("label")
+           num_classes = len(unique_vals)
+- If image is a NumPy array:
+     -Reshape to (H, W, C) where: 
+        - If num_pixels = image.size is a perfect square → grayscale, C=1
+        - Otherwise → C=3 for color images
+     -Convert to PIL: img = transforms.ToPILImage()(image)
+- The preprocess function used with .map() MUST return a dict with keys 'image' and 'label', NEVER a tuple.
+- DataLoaders must use collate_fn to convert dicts to (images, labels) batches.
+- Apply torchvision transforms on PIL images, then convert to tensor.
+- Convert single-channel grayscale tensors to 3 channels when using pretrained models.
+
+If the dataset type is CSV Image Data:
+- CSV rows contain: label + flattened pixel values
+- MAKE SURE to only divide the pixel values by 255 if they are not already in the range 0 - 1. Also make sure to load pixel values as float.
+- Make sure the label is loaded as int.
+- Always compute the number of unique values from the label column and use that to set the number of output classes in the model.
+- Automatically infer image shape and channels from row length:
+      num_pixels = len(row) - 1  # exclude label
+      if (num_pixels ** 0.5).is_integer():
+           height = width = int(num_pixels ** 0.5)
+           channels = 1  # single-channel grayscale
+      else:
+           height = width = int((num_pixels // 3) ** 0.5)
+           channels = 3  # multi-channel image
+
+FOR BOTH CSV AND HUGGINGFACE DATASET:
+- After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
+      - Convert NumPy → PIL using transforms.ToPILImage()
+      - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
+      - Convert back to tensor using transforms.ToTensor()        
+- transforms must run on PIL images, NOT on raw tensors.
+- Correct preprocessing pipeline MUST be:
+      img = img.reshape(H, W, C)
+      img = transforms.ToPILImage()(img)
+      img = transform_pipeline(img)  
+- If using pretrained models, make sure to resize image to what fits the pretrained models (Example: 224 X 224 for resnet18).
+- Normalization MUST use ImageNet statistics when using pretrained models for both training and validation sets:
+      mean = [0.485, 0.456, 0.406]
+      std  = [0.229, 0.224, 0.225].
+- Make sure to have brightness, rotation, or horizontal flip augmentation ONLY for training set. Make sure to use valid syntax for ColorJitter and don't pass invalid parameters.
+- If the image is grayscale, convert to 3-channel AFTER converting to tensor:
+      if tensor.shape[0] == 1:
+          tensor = tensor.repeat(3,1,1).
+
+EXAMPLE STRUCTURE (follow this pattern):
+
+    # Code outline...
+
+2. requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
+
+OUTPUT FORMAT - Use this EXACT structure: 
+=== requirements.txt ===
+package1
+package2>=version
+
+=== model.py === 
+import package1 # … rest of the file
+
+Calling LLM to generate initial code and dependencies...
+✓ Obtained initial model from LangGraph pipeline.
+✓ Wrote requirements.txt
+✓ Wrote model.pyRequirement already satisfied: torch in /opt/pytorch/lib/python3.12/site-packages (from -r requirements.txt (line 1)) (2.8.0+cu129)
+Requirement already satisfied: torchvision in /opt/pytorch/lib/python3.12/site-packages (from -r requirements.txt (line 2)) (0.23.0+cu129)
+Requirement already satisfied: pandas in /opt/pytorch/lib/python3.12/site-packages (from -r requirements.txt (line 3)) (2.3.3)
+Requirement already satisfied: numpy in /opt/pytorch/lib/python3.12/site-packages (from -r requirements.txt (line 4)) (1.26.4)
+Requirement already satisfied: pillow in /opt/pytorch/lib/python3.12/site-packages (from -r requirements.txt (line 5)) (12.0.0)
+Requirement already satisfied: filelock in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (3.20.0)
+Requirement already satisfied: typing-extensions>=4.10.0 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (4.15.0)
+Requirement already satisfied: setuptools in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (80.9.0)
+Requirement already satisfied: sympy>=1.13.3 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (1.14.0)
+Requirement already satisfied: networkx in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (3.5)
+Requirement already satisfied: jinja2 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (3.1.6)
+Requirement already satisfied: fsspec in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (2025.10.0)
+Requirement already satisfied: nvidia-cuda-nvrtc-cu12==12.9.86 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.9.86)
+Requirement already satisfied: nvidia-cuda-runtime-cu12==12.9.79 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.9.79)
+Requirement already satisfied: nvidia-cuda-cupti-cu12==12.9.79 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.9.79)
+Requirement already satisfied: nvidia-cudnn-cu12==9.10.2.21 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (9.10.2.21)
+Requirement already satisfied: nvidia-cublas-cu12==12.9.1.4 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.9.1.4)
+Requirement already satisfied: nvidia-cufft-cu12==11.4.1.4 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (11.4.1.4)
+Requirement already satisfied: nvidia-curand-cu12==10.3.10.19 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (10.3.10.19)
+Requirement already satisfied: nvidia-cusolver-cu12==11.7.5.82 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (11.7.5.82)
+Requirement already satisfied: nvidia-cusparse-cu12==12.5.10.65 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.5.10.65)
+Requirement already satisfied: nvidia-cusparselt-cu12==0.7.1 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (0.7.1)
+Requirement already satisfied: nvidia-nccl-cu12==2.27.3 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (2.27.3)
+Requirement already satisfied: nvidia-nvtx-cu12==12.9.79 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.9.79)
+Requirement already satisfied: nvidia-nvjitlink-cu12==12.9.86 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (12.9.86)
+Requirement already satisfied: nvidia-cufile-cu12==1.14.1.1 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (1.14.1.1)
+Requirement already satisfied: triton==3.4.0 in /opt/pytorch/lib/python3.12/site-packages (from torch->-r requirements.txt (line 1)) (3.4.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in /opt/pytorch/lib/python3.12/site-packages (from pandas->-r requirements.txt (line 3)) (2.9.0.post0)
+Requirement already satisfied: pytz>=2020.1 in /opt/pytorch/lib/python3.12/site-packages (from pandas->-r requirements.txt (line 3)) (2025.2)
+Requirement already satisfied: tzdata>=2022.7 in /opt/pytorch/lib/python3.12/site-packages (from pandas->-r requirements.txt (line 3)) (2025.2)
+Requirement already satisfied: six>=1.5 in /opt/pytorch/lib/python3.12/site-packages (from python-dateutil>=2.8.2->pandas->-r requirements.txt (line 3)) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /opt/pytorch/lib/python3.12/site-packages (from sympy>=1.13.3->torch->-r requirements.txt (line 1)) (1.3.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /opt/pytorch/lib/python3.12/site-packages (from jinja2->torch->-r requirements.txt (line 1)) (3.0.3)
+
+
+=== Iteration 1/3 ===
+Wrote model.py
+import argparse
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.models import resnet18
+from datasets import load_dataset
+import numpy as np
+from PIL import Image
+
+class AircraftClassifier(nn.Module):
+    def __init__(self, num_classes):
+        super(AircraftClassifier, self).__init__()
+        self.base_model = resnet18(pretrained=True)
+        
+        # Freeze layers based on compatibility with ImageNet
+        for param in self.base_model.parameters():
+            param.requires_grad = False
+        
+        # Replace the classifier head
+        self.base_model.fc = nn.Linear(self.base_model.fc.in_features, num_classes)
+        
+        # Dummy forward pass to compute flatten size dynamically
+        self.flatten_size = self._get_flatten_size()
+
+    def _get_flatten_size(self):
+        with torch.no_grad():
+            x = torch.randn(1, 3, 224, 224)  # Assuming input size for ResNet
+            x = self.base_model(x)
+            return x.shape[1]
+
+    def forward(self, x):
+        return self.base_model(x)
+
+def preprocess_image(image):
+    if isinstance(image, list):
+        image = np.array(image, dtype=np.uint8)
+    
+    if image.ndim == 3 and image.shape[2] == 1:  # Grayscale
+        image = np.repeat(image, 3, axis=2)  # Convert to 3 channels
+    
+    image = Image.fromarray(image)
+    transform_pipeline = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return transform_pipeline(image)
+
+def collate_fn(batch):
+    images = []
+    labels = []
+    for item in batch:
+        img = preprocess_image(item['image'])
+        images.append(img)
+        labels.append(item['label'])
+    return torch.stack(images), torch.tensor(labels)
+
+def train(model, train_loader, criterion, optimizer, device, epochs):
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        avg_loss = total_loss / len(train_loader)
+        accuracy = 100 * correct / total
+        print(f'Epoch {epoch + 1}/{epochs}: Train Loss: {avg_loss:.4f}, Train Acc: {accuracy:.2f}%')
+
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    avg_loss = total_loss / len(val_loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train', required=True, help='Path to training data')
+    parser.add_argument('--val', required=True, help='Path to validation data')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+    args = parser.parse_args()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Load datasets
+    train_hf = load_dataset(args.train.rstrip('/train'), split='train')
+    val_hf = load_dataset(args.val.rstrip('/test'), split='test')
+
+    # Get number of classes
+    label_feature = train_hf.features['label']
+    num_classes = label_feature.num_classes if hasattr(label_feature, 'num_classes') else len(set(train_hf['label']))
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_hf, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    val_loader = DataLoader(val_hf, batch_size=args.batch_size, collate_fn=collate_fn)
+
+    # Initialize model, criterion, and optimizer
+    model = AircraftClassifier(num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    # Training and validation loop
+    best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        train(model, train_loader, criterion, optimizer, device, 1)
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        print(f'Epoch {epoch + 1}/{args.epochs}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        
+        # Checkpointing
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'best_model.pth')
+            print(f'Saved best model (Val Acc: {val_acc:.2f}%)')
+
+
+⚠️ Model training produced errors:
+ /opt/pytorch/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+
+Generating train split: 0 examples [00:00, ? examples/s]
+Generating train split: 1000 examples [00:01, 551.99 examples/s]
+Generating train split: 1334 examples [00:02, 492.49 examples/s]
+Generating train split: 2334 examples [00:05, 407.50 examples/s]
+Generating train split: 2668 examples [00:06, 406.92 examples/s]
+Generating train split: 3668 examples [00:09, 349.69 examples/s]
+Generating train split: 4001 examples [00:10, 360.05 examples/s]
+Generating train split: 5001 examples [00:13, 347.89 examples/s]
+Generating train split: 5334 examples [00:14, 325.32 examples/s]
+Generating train split: 6334 examples [00:16, 409.94 examples/s]
+Generating train split: 6667 examples [00:16, 478.60 examples/s]
+Generating train split: 6667 examples [00:16, 407.01 examples/s]
+
+Generating test split: 0 examples [00:00, ? examples/s]
+Generating test split: 1000 examples [00:01, 938.85 examples/s]
+Generating test split: 1111 examples [00:01, 926.29 examples/s]
+Generating test split: 2111 examples [00:02, 649.74 examples/s]
+Generating test split: 2222 examples [00:03, 642.90 examples/s]
+Generating test split: 3222 examples [00:04, 590.69 examples/s]
+Generating test split: 3333 examples [00:05, 587.71 examples/s]
+Generating test split: 3333 examples [00:05, 641.39 examples/s]
+/opt/pytorch/lib/python3.12/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet18_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet18_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+
+  0%|          | 0.00/44.7M [00:00<?, ?B/s]
+ 42%|████▏     | 18.6M/44.7M [00:00<00:00, 195MB/s]
+100%|██████████| 44.7M/44.7M [00:00<00:00, 240MB/s]
+
+Model output:
+ Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth" to /root/.cache/torch/hub/checkpoints/resnet18-f37072fd.pth
+Epoch 1/1: Train Loss: 4.2134, Train Acc: 8.85%
+Epoch 1/10: Val Loss: 3.5925, Val Acc: 21.75%
+Saved best model (Val Acc: 21.75%)
+Epoch 1/1: Train Loss: 3.2815, Train Acc: 25.95%
+Epoch 2/10: Val Loss: 3.1526, Val Acc: 26.76%
+Saved best model (Val Acc: 26.76%)
+Epoch 1/1: Train Loss: 2.7956, Train Acc: 35.23%
+Epoch 3/10: Val Loss: 2.9206, Val Acc: 30.63%
+Saved best model (Val Acc: 30.63%)
+Epoch 1/1: Train Loss: 2.5152, Train Acc: 40.78%
+Epoch 4/10: Val Loss: 2.7468, Val Acc: 33.87%
+Saved best model (Val Acc: 33.87%)
+Epoch 1/1: Train Loss: 2.2871, Train Acc: 45.39%
+Epoch 5/10: Val Loss: 2.6826, Val Acc: 34.62%
+Saved best model (Val Acc: 34.62%)
+Epoch 1/1: Train Loss: 2.1297, Train Acc: 49.00%
+Epoch 6/10: Val Loss: 2.5778, Val Acc: 34.86%
+Saved best model (Val Acc: 34.86%)
+Epoch 1/1: Train Loss: 1.9952, Train Acc: 51.94%
+Epoch 7/10: Val Loss: 2.5640, Val Acc: 35.37%
+Saved best model (Val Acc: 35.37%)
+Epoch 1/1: Train Loss: 1.8923, Train Acc: 53.35%
+Epoch 8/10: Val Loss: 2.5341, Val Acc: 36.30%
+Saved best model (Val Acc: 36.30%)
+Epoch 1/1: Train Loss: 1.8104, Train Acc: 54.96%
+Epoch 9/10: Val Loss: 2.4746, Val Acc: 38.43%
+Saved best model (Val Acc: 38.43%)
+Epoch 1/1: Train Loss: 1.7221, Train Acc: 57.09%
+Epoch 10/10: Val Loss: 2.4656, Val Acc: 37.59%
+
+Extracted metrics: {'val_loss': 2.4656, 'val_acc': 38.43}
+✅ New best model found (Val Loss: 2.4656)
+Refinement iteration complete — model updated.
+
+=== Iteration 2/3 ===
+Wrote model.py
+import argparse
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.models import resnet18
+from datasets import load_dataset
+import numpy as np
+from PIL import Image
+
+class AircraftClassifier(nn.Module):
+    def __init__(self, num_classes):
+        super(AircraftClassifier, self).__init__()
+        self.base_model = resnet18(weights='DEFAULT')  # Use updated weights argument
+        
+        # Unfreeze the last few layers for fine-tuning
+        for param in list(self.base_model.parameters())[:-10]:  # Unfreeze last 10 layers
+            param.requires_grad = False
+        
+        # Replace the classifier head
+        self.base_model.fc = nn.Linear(self.base_model.fc.in_features, num_classes)
+        
+    def forward(self, x):
+        return self.base_model(x)
+
+def preprocess_image(image):
+    if isinstance(image, list):
+        image = np.array(image, dtype=np.uint8)
+    
+    if image.ndim == 3 and image.shape[2] == 1:  # Grayscale
+        image = np.repeat(image, 3, axis=2)  # Convert to 3 channels
+    
+    image = Image.fromarray(image)
+    transform_pipeline = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.RandomHorizontalFlip(),  # Added data augmentation
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return transform_pipeline(image)
+
+def collate_fn(batch):
+    images = []
+    labels = []
+    for item in batch:
+        img = preprocess_image(item['image'])
+        images.append(img)
+        labels.append(item['label'])
+    return torch.stack(images), torch.tensor(labels)
+
+def train(model, train_loader, criterion, optimizer, device, epochs):
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        avg_loss = total_loss / len(train_loader)
+        accuracy = 100 * correct / total
+        print(f'Epoch {epoch + 1}/{epochs}: Train Loss: {avg_loss:.4f}, Train Acc: {accuracy:.2f}%')
+
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    avg_loss = total_loss / len(val_loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train', required=True, help='Path to training data')
+    parser.add_argument('--val', required=True, help='Path to validation data')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')  # Reduced learning rate
+    args = parser.parse_args()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Load datasets
+    train_hf = load_dataset(args.train.rstrip('/train'), split='train')
+    val_hf = load_dataset(args.val.rstrip('/test'), split='test')
+
+    # Get number of classes
+    label_feature = train_hf.features['label']
+    num_classes = label_feature.num_classes if hasattr(label_feature, 'num_classes') else len(set(train_hf['label']))
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_hf, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    val_loader = DataLoader(val_hf, batch_size=args.batch_size, collate_fn=collate_fn)
+
+    # Initialize model, criterion, and optimizer
+    model = AircraftClassifier(num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    # Training and validation loop
+    best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        train(model, train_loader, criterion, optimizer, device, 1)
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        print(f'Epoch {epoch + 1}/{args.epochs}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        
+        # Checkpointing
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'best_model.pth')
+            print(f'Saved best model (Val Acc: {val_acc:.2f}%)')
+
+
+⚠️ Model training produced errors:
+ /opt/pytorch/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+
+Model output:
+ Epoch 1/1: Train Loss: 4.0321, Train Acc: 14.17%
+Epoch 1/10: Val Loss: 3.3741, Val Acc: 27.36%
+Saved best model (Val Acc: 27.36%)
+Epoch 1/1: Train Loss: 2.9500, Train Acc: 38.95%
+Epoch 2/10: Val Loss: 2.7040, Val Acc: 40.29%
+Saved best model (Val Acc: 40.29%)
+Epoch 1/1: Train Loss: 2.3569, Train Acc: 53.25%
+Epoch 3/10: Val Loss: 2.3524, Val Acc: 47.34%
+Saved best model (Val Acc: 47.34%)
+Epoch 1/1: Train Loss: 1.9329, Train Acc: 62.70%
+Epoch 4/10: Val Loss: 2.0675, Val Acc: 51.70%
+Saved best model (Val Acc: 51.70%)
+Epoch 1/1: Train Loss: 1.6018, Train Acc: 70.93%
+Epoch 5/10: Val Loss: 1.9041, Val Acc: 55.03%
+Saved best model (Val Acc: 55.03%)
+Epoch 1/1: Train Loss: 1.3321, Train Acc: 77.56%
+Epoch 6/10: Val Loss: 1.7598, Val Acc: 55.96%
+Saved best model (Val Acc: 55.96%)
+Epoch 1/1: Train Loss: 1.0970, Train Acc: 83.07%
+Epoch 7/10: Val Loss: 1.6746, Val Acc: 57.85%
+Saved best model (Val Acc: 57.85%)
+Epoch 1/1: Train Loss: 0.9246, Train Acc: 86.86%
+Epoch 8/10: Val Loss: 1.6000, Val Acc: 57.94%
+Saved best model (Val Acc: 57.94%)
+Epoch 1/1: Train Loss: 0.7530, Train Acc: 90.55%
+Epoch 9/10: Val Loss: 1.5261, Val Acc: 61.06%
+Saved best model (Val Acc: 61.06%)
+Epoch 1/1: Train Loss: 0.6115, Train Acc: 93.24%
+Epoch 10/10: Val Loss: 1.4967, Val Acc: 60.55%
+
+Extracted metrics: {'val_loss': 1.4967, 'val_acc': 61.06}
+✅ New best model found (Val Loss: 1.4967)
+Refinement iteration complete — model updated.
+
+=== Iteration 3/3 ===
+Wrote model.py
+import argparse
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.models import resnet50  # Changed to a deeper model
+from datasets import load_dataset
+import numpy as np
+from PIL import Image
+
+class AircraftClassifier(nn.Module):
+    def __init__(self, num_classes):
+        super(AircraftClassifier, self).__init__()
+        self.base_model = resnet50(weights='DEFAULT')  # Use updated weights argument
+        
+        # Unfreeze the last few layers for fine-tuning
+        for param in list(self.base_model.parameters())[:-5]:  # Unfreeze last 5 layers
+            param.requires_grad = False
+        
+        # Replace the classifier head
+        self.base_model.fc = nn.Linear(self.base_model.fc.in_features, num_classes)
+        
+    def forward(self, x):
+        return self.base_model(x)
+
+def preprocess_image(image):
+    if isinstance(image, list):
+        image = np.array(image, dtype=np.uint8)
+    
+    if image.ndim == 3 and image.shape[2] == 1:  # Grayscale
+        image = np.repeat(image, 3, axis=2)  # Convert to 3 channels
+    
+    image = Image.fromarray(image)
+    transform_pipeline = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),  # Increased augmentation
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),  # Added rotation for more augmentation
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return transform_pipeline(image)
+
+def collate_fn(batch):
+    images = []
+    labels = []
+    for item in batch:
+        img = preprocess_image(item['image'])
+        images.append(img)
+        labels.append(item['label'])
+    return torch.stack(images), torch.tensor(labels)
+
+def train(model, train_loader, criterion, optimizer, device, epochs):
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        avg_loss = total_loss / len(train_loader)
+        accuracy = 100 * correct / total
+        print(f'Epoch {epoch + 1}/{epochs}: Train Loss: {avg_loss:.4f}, Train Acc: {accuracy:.2f}%')
+
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    avg_loss = total_loss / len(val_loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train', required=True, help='Path to training data')
+    parser.add_argument('--val', required=True, help='Path to validation data')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')
+    args = parser.parse_args()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Load datasets
+    train_hf = load_dataset(args.train.rstrip('/train'), split='train')
+    val_hf = load_dataset(args.val.rstrip('/test'), split='test')
+
+    # Get number of classes
+    label_feature = train_hf.features['label']
+    num_classes = label_feature.num_classes if hasattr(label_feature, 'num_classes') else len(set(train_hf['label']))
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_hf, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    val_loader = DataLoader(val_hf, batch_size=args.batch_size, collate_fn=collate_fn)
+
+    # Initialize model, criterion, and optimizer
+    model = AircraftClassifier(num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    # Training and validation loop
+    best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        train(model, train_loader, criterion, optimizer, device, 1)
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        print(f'Epoch {epoch + 1}/{args.epochs}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        
+        # Checkpointing
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'best_model.pth')
+            print(f'Saved best model (Val Acc: {val_acc:.2f}%)')
+
+
+⚠️ Model training produced errors:
+ /opt/pytorch/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+
+  0%|          | 0.00/97.8M [00:00<?, ?B/s]
+ 20%|█▉        | 19.2M/97.8M [00:00<00:00, 202MB/s]
+ 47%|████▋     | 46.2M/97.8M [00:00<00:00, 249MB/s]
+ 75%|███████▍  | 73.2M/97.8M [00:00<00:00, 264MB/s]
+100%|██████████| 97.8M/97.8M [00:00<00:00, 262MB/s]
+
+Model output:
+ Downloading: "https://download.pytorch.org/models/resnet50-11ad3fa6.pth" to /root/.cache/torch/hub/checkpoints/resnet50-11ad3fa6.pth
+Epoch 1/1: Train Loss: 4.5464, Train Acc: 3.96%
+Epoch 1/10: Val Loss: 4.4541, Val Acc: 9.36%
+Saved best model (Val Acc: 9.36%)
+Epoch 1/1: Train Loss: 4.3410, Train Acc: 12.55%
+Epoch 2/10: Val Loss: 4.2434, Val Acc: 14.28%
+Saved best model (Val Acc: 14.28%)
+Epoch 1/1: Train Loss: 4.0746, Train Acc: 17.44%
+Epoch 3/10: Val Loss: 3.9851, Val Acc: 16.77%
+Saved best model (Val Acc: 16.77%)
+Epoch 1/1: Train Loss: 3.7970, Train Acc: 21.01%
+Epoch 4/10: Val Loss: 3.7648, Val Acc: 18.75%
+Saved best model (Val Acc: 18.75%)
+Epoch 1/1: Train Loss: 3.5772, Train Acc: 23.38%
+Epoch 5/10: Val Loss: 3.6248, Val Acc: 19.71%
+Saved best model (Val Acc: 19.71%)
+Epoch 1/1: Train Loss: 3.3893, Train Acc: 26.29%
+Epoch 6/10: Val Loss: 3.4798, Val Acc: 21.81%
+Saved best model (Val Acc: 21.81%)
+Epoch 1/1: Train Loss: 3.2439, Train Acc: 27.93%
+Epoch 7/10: Val Loss: 3.3838, Val Acc: 22.26%
+Saved best model (Val Acc: 22.26%)
+Epoch 1/1: Train Loss: 3.1227, Train Acc: 29.65%
+Epoch 8/10: Val Loss: 3.2762, Val Acc: 23.70%
+Saved best model (Val Acc: 23.70%)
+Epoch 1/1: Train Loss: 3.0158, Train Acc: 31.74%
+Epoch 9/10: Val Loss: 3.2050, Val Acc: 24.42%
+Saved best model (Val Acc: 24.42%)
+Epoch 1/1: Train Loss: 2.9221, Train Acc: 34.02%
+Epoch 10/10: Val Loss: 3.1124, Val Acc: 26.61%
+Saved best model (Val Acc: 26.61%)
+
+Extracted metrics: {'val_loss': 3.1124, 'val_acc': 26.61}
+Refinement iteration complete — model updated.
+Wrote best_model.py
+
+    You are the LEADER agent.
+
+    You DO NOT write code.  
+    You generate the FULL AND COMPLETE prompt for the MODEL AGENT to use on the next run FOR ANY CSV IMAGE DATASET.
+
+    Here is the current model agent prompt:
+    ---------------------------------------------------------
+    You are to generate TWO files:
+
+1. model.py - A Python file that includes:
+- A train() function that trains the model for multiple epochs.
+- A validate() function that evaluates the model on a validation dataset and reports metrics.
+- An if __name__ == '__main__' block with argparse CLI.
+- Only output the code.
+
+CRITICAL REQUIREMENTS:
+
+1. ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to training data) --val (path to validation data) --epochs (number of epochs) --batch-size (batch size) --lr (learning rate). Default the epochs, batch size, and learning rate to reasonable values based on common practices.
+
+2. DEVICE HANDLING - MUST support both CPU and GPU: device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'). Ensure that the model and data are moved to the appropriate device in both train() and validate() functions.
+
+3. TRAINING LOOP - Proper structure:
+   - The train function should accept epochs as a parameter and run the full training loop. Move model and data to device inside the function.
+   - train() should be called with epochs = 1 if train is being in a loop of epochs.
+   - Print the average loss per epoch (not just the last batch).
+   - In the main block, call train() ONCE with all epochs, not in a loop.
+
+4. LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%.
+
+5. CHECKPOINTING - Save the model when the validation metric improves: torch.save(model.state_dict(), 'best_model.pth'). Print a message when saving: 'Saved best model (Val Acc: XX.XX%)'.
+
+6. CODE QUALITY:
+   - Use clear and descriptive variable names.
+   - Add docstrings to all functions.
+   - Handle edge cases (e.g., empty datasets, etc.).
+
+7. DEPENDENCIES - ONLY use these libraries:
+   - torch (and torch.nn, torch.optim, torch.utils.data)
+   - pandas (for CSV reading)
+   - numpy (optional)
+   - torchvision (ONLY for ImageFolder OR transfer learning)
+
+8. MODEL CLASS - Use a pretrained model such as ResNet18 or MobileNetV3 UNLESS IT IS A VERY SIMPLE DATASET.
+    - ONLY freeze all the pretrained layers if the image dataset is compatible with ImageNet out of the box:
+        for param in self.base_model.parameters():
+            param.requires_grad = False.
+    - If the image dataset is not compatible with ImageNet, allow finetuning on the last X layers of the pretrained model based on what makes sense. Here is an example:
+        for name, param in self.base_model.named_parameters():
+            if "layer3" in name or "layer4" in name or "fc" in name:
+              param.requires_grad = True.
+            else:
+               param.requires_grad = False.
+    - Replace the classifier head with a new Linear layer of correct output size.
+    - Use adaptive pooling or a dummy forward pass to compute flatten size dynamically.
+- Aim for >90% accuracy.
+- The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer. Define all layers used in forward() before calling the flatten-size computation helper.
+- In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
+
+Dataset Description: {{dataset_description}}
+
+Dataset schema facts: {{facts_json_here}}
+
+Dataset type Specific handling: 
+{{dataset_type_specific_handling}}
+
+{{dataset_generation_code}}
+
+If the dataset type is huggingface:
+- Use huggingface datasets to load data: 
+      from datasets import load_dataset
+      train_hf = load_dataset(<Use whatever is passed as --train argument and remove train at end of path if it exists>, split="train")
+      test_hf = load_dataset(<Use whatever is passed as --test argument and remove test at end of path if it exists>, split="test")
+- The dataset contains:
+ - image feature: either a PIL image or a NumPy array or list representing pixel values. 
+       - If image is list, convert it to numpy array with dtype uint8.
+       - image preprocessing must be able to handle both PIL image and numpy array image input
+ - label feature: ClassLabel or int64 Value 
+- Labels must be loaded as int and num_classes must be computed from the label feature to set the model output size:
+     - label_feature = train_hf.features["label"]
+       # --- Robust num_classes detection ---
+       if hasattr(label_feature, "num_classes"):
+           # Case 1: ClassLabel
+           num_classes = label_feature.num_classes
+       else:
+           # Case 2: Value(int) -> infer unique labels
+           # Efficient: take unique from arrow without loading all
+           unique_vals = ds.unique("label")
+           num_classes = len(unique_vals)
+- If image is a NumPy array:
+     -Reshape to (H, W, C) where: 
+        - If num_pixels = image.size is a perfect square → grayscale, C=1
+        - Otherwise → C=3 for color images
+     -Convert to PIL: img = transforms.ToPILImage()(image)
+- The preprocess function used with .map() MUST return a dict with keys 'image' and 'label', NEVER a tuple.
+- DataLoaders must use collate_fn to convert dicts to (images, labels) batches.
+- Apply torchvision transforms on PIL images, then convert to tensor.
+- Convert single-channel grayscale tensors to 3 channels when using pretrained models.
+
+If the dataset type is CSV Image Data:
+- CSV rows contain: label + flattened pixel values
+- MAKE SURE to only divide the pixel values by 255 if they are not already in the range 0 - 1. Also make sure to load pixel values as float.
+- Make sure the label is loaded as int.
+- Always compute the number of unique values from the label column and use that to set the number of output classes in the model.
+- Automatically infer image shape and channels from row length:
+      num_pixels = len(row) - 1  # exclude label
+      if (num_pixels ** 0.5).is_integer():
+           height = width = int(num_pixels ** 0.5)
+           channels = 1  # single-channel grayscale
+      else:
+           height = width = int((num_pixels // 3) ** 0.5)
+           channels = 3  # multi-channel image
+
+FOR BOTH CSV AND HUGGINGFACE DATASET:
+- After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
+      - Convert NumPy → PIL using transforms.ToPILImage()
+      - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
+      - Convert back to tensor using transforms.ToTensor()        
+- transforms must run on PIL images, NOT on raw tensors.
+- Correct preprocessing pipeline MUST be:
+      img = img.reshape(H, W, C)
+      img = transforms.ToPILImage()(img)
+      img = transform_pipeline(img)  
+- If using pretrained models, make sure to resize image to what fits the pretrained models (Example: 224 X 224 for resnet18).
+- Normalization MUST use ImageNet statistics when using pretrained models for both training and validation sets:
+      mean = [0.485, 0.456, 0.406]
+      std  = [0.229, 0.224, 0.225].
+- Make sure to have brightness, rotation, or horizontal flip augmentation ONLY for training set. Make sure to use valid syntax for ColorJitter and don't pass invalid parameters.
+- If the image is grayscale, convert to 3-channel AFTER converting to tensor:
+      if tensor.shape[0] == 1:
+          tensor = tensor.repeat(3,1,1).
+
+EXAMPLE STRUCTURE (follow this pattern):
+
+    # Code outline...
+
+2. requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
+
+OUTPUT FORMAT - Use this EXACT structure: 
+=== requirements.txt ===
+package1
+package2>=version
+
+=== model.py === 
+import package1 # … rest of the file
+
+    ---------------------------------------------------------
+
+    Here is the best performing model:
+    ---------------------------------------------------------
+    import argparse
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.models import resnet18
+from datasets import load_dataset
+import numpy as np
+from PIL import Image
+
+class AircraftClassifier(nn.Module):
+    def __init__(self, num_classes):
+        super(AircraftClassifier, self).__init__()
+        self.base_model = resnet18(weights='DEFAULT')  # Use updated weights argument
+        
+        # Unfreeze the last few layers for fine-tuning
+        for param in list(self.base_model.parameters())[:-10]:  # Unfreeze last 10 layers
+            param.requires_grad = False
+        
+        # Replace the classifier head
+        self.base_model.fc = nn.Linear(self.base_model.fc.in_features, num_classes)
+        
+    def forward(self, x):
+        return self.base_model(x)
+
+def preprocess_image(image):
+    if isinstance(image, list):
+        image = np.array(image, dtype=np.uint8)
+    
+    if image.ndim == 3 and image.shape[2] == 1:  # Grayscale
+        image = np.repeat(image, 3, axis=2)  # Convert to 3 channels
+    
+    image = Image.fromarray(image)
+    transform_pipeline = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.RandomHorizontalFlip(),  # Added data augmentation
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return transform_pipeline(image)
+
+def collate_fn(batch):
+    images = []
+    labels = []
+    for item in batch:
+        img = preprocess_image(item['image'])
+        images.append(img)
+        labels.append(item['label'])
+    return torch.stack(images), torch.tensor(labels)
+
+def train(model, train_loader, criterion, optimizer, device, epochs):
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        avg_loss = total_loss / len(train_loader)
+        accuracy = 100 * correct / total
+        print(f'Epoch {epoch + 1}/{epochs}: Train Loss: {avg_loss:.4f}, Train Acc: {accuracy:.2f}%')
+
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    avg_loss = total_loss / len(val_loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train', required=True, help='Path to training data')
+    parser.add_argument('--val', required=True, help='Path to validation data')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')  # Reduced learning rate
+    args = parser.parse_args()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Load datasets
+    train_hf = load_dataset(args.train.rstrip('/train'), split='train')
+    val_hf = load_dataset(args.val.rstrip('/test'), split='test')
+
+    # Get number of classes
+    label_feature = train_hf.features['label']
+    num_classes = label_feature.num_classes if hasattr(label_feature, 'num_classes') else len(set(train_hf['label']))
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_hf, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    val_loader = DataLoader(val_hf, batch_size=args.batch_size, collate_fn=collate_fn)
+
+    # Initialize model, criterion, and optimizer
+    model = AircraftClassifier(num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    # Training and validation loop
+    best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        train(model, train_loader, criterion, optimizer, device, 1)
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        print(f'Epoch {epoch + 1}/{args.epochs}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        
+        # Checkpointing
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'best_model.pth')
+            print(f'Saved best model (Val Acc: {val_acc:.2f}%)')
+    ---------------------------------------------------------
+
+    Here are the corresponding logs generated from training the model:
+    ---------------------------------------------------------
+    Epoch 1/1: Train Loss: 4.0321, Train Acc: 14.17%
+Epoch 1/10: Val Loss: 3.3741, Val Acc: 27.36%
+Saved best model (Val Acc: 27.36%)
+Epoch 1/1: Train Loss: 2.9500, Train Acc: 38.95%
+Epoch 2/10: Val Loss: 2.7040, Val Acc: 40.29%
+Saved best model (Val Acc: 40.29%)
+Epoch 1/1: Train Loss: 2.3569, Train Acc: 53.25%
+Epoch 3/10: Val Loss: 2.3524, Val Acc: 47.34%
+Saved best model (Val Acc: 47.34%)
+Epoch 1/1: Train Loss: 1.9329, Train Acc: 62.70%
+Epoch 4/10: Val Loss: 2.0675, Val Acc: 51.70%
+Saved best model (Val Acc: 51.70%)
+Epoch 1/1: Train Loss: 1.6018, Train Acc: 70.93%
+Epoch 5/10: Val Loss: 1.9041, Val Acc: 55.03%
+Saved best model (Val Acc: 55.03%)
+Epoch 1/1: Train Loss: 1.3321, Train Acc: 77.56%
+Epoch 6/10: Val Loss: 1.7598, Val Acc: 55.96%
+Saved best model (Val Acc: 55.96%)
+Epoch 1/1: Train Loss: 1.0970, Train Acc: 83.07%
+Epoch 7/10: Val Loss: 1.6746, Val Acc: 57.85%
+Saved best model (Val Acc: 57.85%)
+Epoch 1/1: Train Loss: 0.9246, Train Acc: 86.86%
+Epoch 8/10: Val Loss: 1.6000, Val Acc: 57.94%
+Saved best model (Val Acc: 57.94%)
+Epoch 1/1: Train Loss: 0.7530, Train Acc: 90.55%
+Epoch 9/10: Val Loss: 1.5261, Val Acc: 61.06%
+Saved best model (Val Acc: 61.06%)
+Epoch 1/1: Train Loss: 0.6115, Train Acc: 93.24%
+Epoch 10/10: Val Loss: 1.4967, Val Acc: 60.55%
+
+    ---------------------------------------------------------
+
+    Your task:
+    - Analyze the problems, failures, performance, architecture, training behavior.
+    - Create a brand-new, fully rewritten Model Agent Prompt.
+    - This new prompt must contain EVERYTHING the Model Agent needs to generate a future model.py.
+    - Keep both performance and duration of model training in mind. 
+    - DO NOT reference past prompts; produce a full standalone prompt.
+    - DO NOT output code.
+    - Output ONLY the prompt text, no extra delimiters.
+
+    New MODEL AGENT prompt:
+    
+You are to generate TWO files:
+
+1. model.py - A Python file that includes:
+- A train() function that trains the model for multiple epochs.
+- A validate() function that evaluates the model on a validation dataset and reports metrics.
+- An if __name__ == '__main__' block with argparse CLI.
+- Only output the code.
+
+CRITICAL REQUIREMENTS:
+
+1. ARGPARSE INTERFACE - Use these EXACT argument names: --train (path to training data) --val (path to validation data) --epochs (number of epochs) --batch-size (batch size) --lr (learning rate). Default the epochs, batch size, and learning rate to reasonable values based on common practices.
+
+2. DEVICE HANDLING - MUST support both CPU and GPU: device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'). Ensure that the model and data are moved to the appropriate device in both train() and validate() functions.
+
+3. TRAINING LOOP - Proper structure:
+   - The train function should accept epochs as a parameter and run the full training loop. Move model and data to device inside the function.
+   - train() should be called with epochs = 1 if train is being in a loop of epochs.
+   - Print the average loss per epoch (not just the last batch).
+   - In the main block, call train() ONCE with all epochs, not in a loop.
+
+4. LOGGING - Print after each epoch: Epoch X/Y: Train Loss: 0.XXXX, Train Acc: XX.XX%, Val Loss: 0.XXXX, Val Acc: XX.XX%.
+
+5. CHECKPOINTING - Save the model when the validation metric improves: torch.save(model.state_dict(), 'best_model.pth'). Print a message when saving: 'Saved best model (Val Acc: XX.XX%)'.
+
+6. CODE QUALITY:
+   - Use clear and descriptive variable names.
+   - Add docstrings to all functions.
+   - Handle edge cases (e.g., empty datasets, etc.).
+
+7. DEPENDENCIES - ONLY use these libraries:
+   - torch (and torch.nn, torch.optim, torch.utils.data)
+   - pandas (for CSV reading)
+   - numpy (optional)
+   - torchvision (ONLY for ImageFolder OR transfer learning)
+
+8. MODEL CLASS - Use a pretrained model such as ResNet18 or MobileNetV3 UNLESS IT IS A VERY SIMPLE DATASET.
+    - ONLY freeze all the pretrained layers if the image dataset is compatible with ImageNet out of the box:
+        for param in self.base_model.parameters():
+            param.requires_grad = False.
+    - If the image dataset is not compatible with ImageNet, allow finetuning on the last X layers of the pretrained model based on what makes sense. Here is an example:
+        for name, param in self.base_model.named_parameters():
+            if "layer3" in name or "layer4" in name or "fc" in name:
+              param.requires_grad = True.
+            else:
+               param.requires_grad = False.
+    - Replace the classifier head with a new Linear layer of correct output size.
+    - Use adaptive pooling or a dummy forward pass to compute flatten size dynamically.
+- Aim for >90% accuracy.
+- The model MUST compute the flatten dimension dynamically during initialization using a dummy forward pass. Do NOT hardcode the input size to the fully-connected layer. Define all layers used in forward() before calling the flatten-size computation helper.
+- In forward(), flatten using torch.flatten(x, 1) — NEVER use x.view(-1, fixed_number).
+
+Dataset Description: {{dataset_description}}
+
+Dataset schema facts: {{facts_json_here}}
+
+Dataset type Specific handling: 
+{{dataset_type_specific_handling}}
+
+{{dataset_generation_code}}
+
+If the dataset type is huggingface:
+- Use huggingface datasets to load data: 
+      from datasets import load_dataset
+      train_hf = load_dataset(<Use whatever is passed as --train argument and remove train at end of path if it exists>, split="train")
+      test_hf = load_dataset(<Use whatever is passed as --test argument and remove test at end of path if it exists>, split="test")
+- The dataset contains:
+ - image feature: either a PIL image or a NumPy array or list representing pixel values. 
+       - If image is list, convert it to numpy array with dtype uint8.
+       - image preprocessing must be able to handle both PIL image and numpy array image input
+ - label feature: ClassLabel or int64 Value 
+- Labels must be loaded as int and num_classes must be computed from the label feature to set the model output size:
+     - label_feature = train_hf.features["label"]
+       # --- Robust num_classes detection ---
+       if hasattr(label_feature, "num_classes"):
+           # Case 1: ClassLabel
+           num_classes = label_feature.num_classes
+       else:
+           # Case 2: Value(int) -> infer unique labels
+           # Efficient: take unique from arrow without loading all
+           unique_vals = ds.unique("label")
+           num_classes = len(unique_vals)
+- If image is a NumPy array:
+     -Reshape to (H, W, C) where: 
+        - If num_pixels = image.size is a perfect square → grayscale, C=1
+        - Otherwise → C=3 for color images
+     -Convert to PIL: img = transforms.ToPILImage()(image)
+- The preprocess function used with .map() MUST return a dict with keys 'image' and 'label', NEVER a tuple.
+- DataLoaders must use collate_fn to convert dicts to (images, labels) batches.
+- Apply torchvision transforms on PIL images, then convert to tensor.
+- Convert single-channel grayscale tensors to 3 channels when using pretrained models.
+
+If the dataset type is CSV Image Data:
+- CSV rows contain: label + flattened pixel values
+- MAKE SURE to only divide the pixel values by 255 if they are not already in the range 0 - 1. Also make sure to load pixel values as float.
+- Make sure the label is loaded as int.
+- Always compute the number of unique values from the label column and use that to set the number of output classes in the model.
+- Automatically infer image shape and channels from row length:
+      num_pixels = len(row) - 1  # exclude label
+      if (num_pixels ** 0.5).is_integer():
+           height = width = int(num_pixels ** 0.5)
+           channels = 1  # single-channel grayscale
+      else:
+           height = width = int((num_pixels // 3) ** 0.5)
+           channels = 3  # multi-channel image
+
+FOR BOTH CSV AND HUGGINGFACE DATASET:
+- After reshaping into (H,W,C) or (C,H,W), the model.py MUST:
+      - Convert NumPy → PIL using transforms.ToPILImage()
+      - Apply PIL-based torchvision transforms (Resize, ColorJitter, etc.)
+      - Convert back to tensor using transforms.ToTensor()        
+- transforms must run on PIL images, NOT on raw tensors.
+- Correct preprocessing pipeline MUST be:
+      img = img.reshape(H, W, C)
+      img = transforms.ToPILImage()(img)
+      img = transform_pipeline(img)  
+- If using pretrained models, make sure to resize image to what fits the pretrained models (Example: 224 X 224 for resnet18).
+- Normalization MUST use ImageNet statistics when using pretrained models for both training and validation sets:
+      mean = [0.485, 0.456, 0.406]
+      std  = [0.229, 0.224, 0.225].
+- Make sure to have brightness, rotation, or horizontal flip augmentation ONLY for training set. Make sure to use valid syntax for ColorJitter and don't pass invalid parameters.
+- If the image is grayscale, convert to 3-channel AFTER converting to tensor:
+      if tensor.shape[0] == 1:
+          tensor = tensor.repeat(3,1,1).
+
+EXAMPLE STRUCTURE (follow this pattern):
+
+    # Code outline...
+
+2. requirements.txt - List all pip packages needed (one per line). Include version constraints if important. Packages: torch, torchvision, pandas, numpy, pillow.
+
+OUTPUT FORMAT - Use this EXACT structure: 
+=== requirements.txt ===
+package1
+package2>=version
+
+=== model.py === 
+import package1 # … rest of the file
+
+Best model saved as best_model.py with val_loss=1.4967
